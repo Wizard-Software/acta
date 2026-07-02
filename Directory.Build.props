@@ -1,0 +1,23 @@
+<Project>
+
+  <!--
+    Zadanie 0.1 (Feature 0 / łańcuch dostaw, backlog R3-B4): TYLKO ustawienia lock-file.
+    Włącza plik blokady pakietów (packages.lock.json) od pierwszego dnia oraz tryb
+    zablokowany w CI (bramka determinizmu grafu zależności).
+
+    UWAGA dla zadania 0.2: ten plik należy ROZSZERZYĆ (dodać kolejne PropertyGroup/ItemGroup:
+    Nullable, LangVersion, analizatory CA3xxx/CA5xxx jako błędy, wymuszanie CancellationToken,
+    spięcie z Central Package Management / Directory.Packages.props). NIE nadpisywać.
+  -->
+
+  <PropertyGroup>
+    <!-- Generuj packages.lock.json przy każdym restore (supply-chain: zamrożony graf). -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
+    <!-- Tryb zablokowany tylko w CI: restore nie może zmienić grafu zależności.
+         Lokalnie pozostaje wyłączony, by nie blokować legalnych aktualizacji pakietów.
+         GitHub Actions (zadanie 0.3) musi przekazać -p:ContinuousIntegrationBuild=true. -->
+    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+  </PropertyGroup>
+
+</Project>
