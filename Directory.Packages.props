@@ -1,12 +1,12 @@
 <Project>
 
   <!--
-    Zadanie 0.2 (Feature 0 / szkielet solution): Central Package Management (CPM).
-    Jedno źródło prawdy dla wersji pakietów; projekty używają <PackageReference> bez atrybutu Version.
-    Kanoniczna lokalizacja ManagePackageVersionsCentrally (współgra z packages.lock.json z 0.1).
-    Lista ograniczona do faktycznie referowanego stosu testowego (decyzja GAP-1) — pozostałe
-    pakiety (NSubstitute, Testcontainers, BenchmarkDotNet, Npgsql, CsCheck) dołączą przy pierwszym
-    zadaniu z kodem, które je referuje ("ASK FIRST" dla nowych zależności src/, CONSTITUTION §2).
+    Central Package Management (CPM): a single source of truth for package versions;
+    projects use <PackageReference> without a Version attribute. The canonical location
+    for ManagePackageVersionsCentrally (works together with packages.lock.json).
+    The list is limited to the test stack actually referenced so far — other packages
+    (NSubstitute, Testcontainers, BenchmarkDotNet, Npgsql, CsCheck) will be added by the
+    first code task that references them.
   -->
 
   <PropertyGroup>
@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Stos testowy (xUnit v3) — najnowsze stabilne zweryfikowane przy implementacji 0.2 (OQ2). -->
+    <!-- Test stack (xUnit v3) — latest stable versions verified at implementation time. -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

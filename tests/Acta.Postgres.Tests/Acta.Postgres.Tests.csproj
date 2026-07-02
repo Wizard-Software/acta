@@ -12,7 +12,7 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
-  <!-- Dziedziczy testy kontraktowe z Acta.Tests (TESTING-SPEC §2); adapter + harness. -->
+  <!-- Inherits the contract tests from Acta.Tests; adapter + harness. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Acta.Postgres\Acta.Postgres.csproj" />
     <ProjectReference Include="..\..\src\Acta.Testing\Acta.Testing.csproj" />
