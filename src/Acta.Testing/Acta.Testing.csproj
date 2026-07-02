@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Harness GWT (Spec.For<T>() — FR-15) → rdzeń. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Acta\Acta.csproj" />
+  </ItemGroup>
+
+</Project>

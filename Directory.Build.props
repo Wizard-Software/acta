@@ -20,4 +20,27 @@
     <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
   </PropertyGroup>
 
+  <!--
+    Zadanie 0.2 (Feature 0 / szkielet solution): konwencje kompilacji wspólne dla wszystkich
+    projektów. TFM net10.0 (C# 14), nullable + implicit usings, analizatory .NET z rodziną
+    reguł bezpieczeństwa jako błędy (severities w root .editorconfig: category-Security = error,
+    CA2016 = error). Central Package Management jest włączone w Directory.Packages.props
+    (kanoniczna lokalizacja ManagePackageVersionsCentrally — bez duplikatu tutaj).
+
+    Determinizm toolchainu (PERF-1 z głębokiej weryfikacji): LangVersion i AnalysisLevel są
+    PRZYPIĘTE do stałych pasm (14.0 / 10.0) zamiast `latest`, a SDK jest przypięty przez
+    global.json. Zapobiega to sytuacji, w której roll-forward SDK aktywuje nowe reguły
+    security jako błędy i wywraca niezmieniony build (lock-file zamraża graf NuGet, ale NIE
+    toolchain kompilatora/analizatorów). Domyka historię reprodukowalnego builda (R3-B4).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>10.0</AnalysisLevel>
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+  </PropertyGroup>
+
 </Project>
