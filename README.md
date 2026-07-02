@@ -1,28 +1,63 @@
 # Acta
 
-Biblioteka Event Sourcing dla .NET 10 — trwałość zdarzeń, projekcje i koordynacja multi-pod oparta na gwarancjach bazy danych.
+**Acta** is an Event Sourcing library for **.NET 10**. It provides durable,
+append-only event storage, projections, and multi-pod coordination backed by
+database guarantees — so multiple application instances can safely share one
+event store without a separate coordinator.
 
-## Status
+> **Status:** early scaffold — **Phase 0 (Bootstrap)**. The public API and
+> implementation are being built out across the roadmap. This repository
+> currently contains the solution skeleton, supply-chain hardening, and the CI
+> security gates.
 
-Szkielet w budowie — **Faza 0 (Bootstrap)**. Repozytorium zawiera dokumentację architektury oraz szkielet łańcucha dostaw; kod źródłowy powstaje w kolejnych fazach roadmapy (patrz [AI-GUIDE.md](.forge/docs/architecture/AI-GUIDE.md)).
+## What it does
 
-## Stos
+- **Event store** — an append-only log with two interchangeable backends: an
+  in-memory backend for fast tests and a **PostgreSQL** backend for production.
+- **Aggregates & repositories** — load/replay aggregates from their event
+  streams, enforcing the `Owner.Target` ownership invariant.
+- **Projections** — build read models both inline and via an asynchronous
+  projection daemon.
+- **Snapshots & correlation** — bounded replay via snapshots and end-to-end
+  correlation of events.
+- **Multi-pod coordination** — N application pods plus PostgreSQL, using the
+  database's own guarantees for ordering and coordination; a hexagonal
+  (ports & adapters) design keeps the core independent of the backend.
 
-- **TFM:** `net10.0`
-- **Język:** C# 14
-- **SDK:** .NET 10.0.301
-- **Testy:** xUnit v3 + Stryker.NET (≥ 80% mutation score) + Testcontainers (ADR-013)
+The feature set is layered in tiers: event model & serialization → event store
+→ aggregates → projections → snapshots → upcasting, outbox, idempotency and
+observability → crypto-shredding and multi-tenancy.
 
-## Dokumentacja
+## Packages
 
-- Nawigacja po dokumentacji architektury → [.forge/docs/architecture/README.md](.forge/docs/architecture/README.md)
-- Kolejność czytania dla agenta AI → [.forge/docs/architecture/AI-GUIDE.md](.forge/docs/architecture/AI-GUIDE.md)
-- Konwencje i granice → [.forge/docs/architecture/CONSTITUTION.md](.forge/docs/architecture/CONSTITUTION.md)
+| Package | Purpose |
+|---|---|
+| `Acta.Abstractions` | Public ports and contracts (10 port groups) |
+| `Acta` | Core implementation |
+| `Acta.Postgres` | PostgreSQL backend adapter |
+| `Acta.Testing` | Testing helpers for consumers |
 
-## Łańcuch dostaw
+## Tech stack
 
-Od pierwszego commita obowiązują bramki supply-chain: przypięte źródło NuGet ([nuget.config](nuget.config)) oraz plik blokady pakietów `packages.lock.json` z trybem `RestoreLockedMode` w CI ([Directory.Build.props](Directory.Build.props)). Pełny zestaw bramek CI (build, testy architektury, mutacje, SAST, skan zależności, skan sekretów) dochodzi w zadaniu 0.3.
+- **Target framework:** `net10.0` · **Language:** C# 14 · **SDK:** 10.0.301
+- **Testing:** xUnit v3, Testcontainers, Stryker.NET (≥ 80% mutation score on
+  `src/Acta`), CsCheck, BenchmarkDotNet
 
-## Licencja
+## Build
 
-MIT (patrz [CONSTITUTION.md](.forge/docs/architecture/CONSTITUTION.md) §3). Plik `LICENSE` zostanie dodany w fazie dojrzałości (Faza 5).
+```bash
+dotnet build Acta.slnx
+```
+
+## CI & security gates
+
+Every push and pull request runs the full gate set: build + tests, architecture
+tests, mutation testing (Stryker.NET), SAST (CodeQL + Roslyn security
+analyzers), dependency scanning (plus Dependabot), and secret scanning with
+push protection. Supply-chain integrity is enforced from the first commit via a
+pinned NuGet source and a committed `packages.lock.json` lock file
+(`RestoreLockedMode` in CI).
+
+## License
+
+[MIT](LICENSE) © 2026 Wizard Software (Artur Sawicki)
