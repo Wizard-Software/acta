@@ -1,4 +1,4 @@
-// Szkielet benchmarków (zadanie 0.2): kompilowalny punkt wejścia.
-// Wpięcie BenchmarkDotNet (BenchmarkSwitcher) i scenariuszy z TESTING-SPEC §7 nastąpi w Fazie 5.
-// Na etapie szkieletu brak referencji pakietu BenchmarkDotNet (decyzja GAP-1 / §9 planu).
+// Benchmark skeleton: a compilable entry point.
+// BenchmarkDotNet (BenchmarkSwitcher) and the actual benchmark scenarios will be wired up later.
+// At this skeleton stage there is no BenchmarkDotNet package reference yet.
 return;

@@ -1,7 +1,7 @@
-# CI — bramki jakości 1,2,3,5 (TESTING-SPEC.md §8), łańcuchowane `needs:` w kolejności.
-# Bramka 4 (SAST/CodeQL) i 6 (sekrety) są w osobnych workflow (codeql.yml, secret-scan.yml).
-# Kryterium QW2: pipeline zielony na pustym szkielecie solution.
-# Akcje przypięte do SHA (SEC-1, determinizm R3-B4); Dependabot (github-actions) utrzymuje je.
+# CI — quality gates 1, 2, 3, 5, chained in order via `needs:`.
+# Gate 4 (SAST/CodeQL) and gate 6 (secrets) live in separate workflows (codeql.yml, secret-scan.yml).
+# The pipeline stays green on an empty solution skeleton.
+# Actions are pinned to SHAs (determinism); Dependabot (github-actions) keeps them current.
 name: CI
 
 on:
@@ -23,7 +23,7 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
 
 jobs:
-  # ── Bramka 1: Build + testy (in-memory + Testcontainers) ──────────────────
+  # ── Gate 1: build + tests (in-memory + Testcontainers) ────────────────────
   build-test:
     name: "Gate 1 — build + tests"
     runs-on: ubuntu-latest
@@ -34,20 +34,20 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: "**/packages.lock.json"
-      # Locked-mode restore: -p:ContinuousIntegrationBuild=true aktywuje RestoreLockedMode
-      # z Directory.Build.props (walidacja packages.lock.json — determinizm grafu NuGet).
+      # Locked-mode restore: -p:ContinuousIntegrationBuild=true activates RestoreLockedMode
+      # from Directory.Build.props (validates packages.lock.json — NuGet graph determinism).
       - name: Restore (locked)
         run: dotnet restore Acta.slnx -p:ContinuousIntegrationBuild=true
       - name: Build (Release)
         run: dotnet build Acta.slnx -c Release --no-restore -p:ContinuousIntegrationBuild=true
-      # ubuntu-latest ma Docker → Testcontainers (Postgres) zadziałają, gdy pojawią się
-      # testy integracyjne. Na pustym szkielecie liczba testów = 0 → sukces.
+      # ubuntu-latest has Docker -> Testcontainers (Postgres) will work once integration
+      # tests appear. On the empty skeleton the test count is 0 -> success.
       - name: Test (in-memory + Testcontainers)
         run: dotnet test Acta.slnx -c Release --no-build -p:ContinuousIntegrationBuild=true
 
-  # ── Bramka 2: Testy architektury (AK-2, Owner.Target) ─────────────────────
+  # ── Gate 2: architecture tests ────────────────────────────────────────────
   architecture-tests:
-    name: "Gate 2 — architecture tests (AK-2)"
+    name: "Gate 2 — architecture tests"
     runs-on: ubuntu-latest
     needs: build-test
     steps:
@@ -62,7 +62,7 @@ jobs:
           dotnet test tests/Acta.ArchitectureTests/Acta.ArchitectureTests.csproj
           -c Release -p:ContinuousIntegrationBuild=true
 
-  # ── Bramka 3: Testy mutacyjne (Stryker.NET ≥ 80% na src/Acta, ADR-013) ─────
+  # ── Gate 3: mutation testing (Stryker.NET >= 80% on src/Acta) ──────────────
   mutation:
     name: "Gate 3 — mutation (Stryker >= 80%)"
     runs-on: ubuntu-latest
@@ -76,9 +76,9 @@ jobs:
           cache-dependency-path: "**/packages.lock.json"
       - name: Restore tools (dotnet-stryker)
         run: dotnet tool restore
-      # Guard pustego szkieletu (GAP-2/RISK-1): bramka zielona przy 0 mutantów,
-      # blokująca (kod wyjścia Stryker, break=80 w stryker-config.json) na realnym kodzie.
-      # Kluczujemy na obecności raportu + liczbie mutantów, NIE tylko na treści JSON.
+      # Empty-skeleton guard: the gate is green with 0 mutants and blocking (Stryker exit
+      # code, break=80 in stryker-config.json) on real code. We key on the presence of the
+      # report + the mutant count, NOT just on the JSON body.
       - name: Run Stryker (guarded)
         run: |
           set -uo pipefail
@@ -90,23 +90,23 @@ jobs:
           report="$(find . -path '*/StrykerOutput/*/reports/mutation-report.json' -print -quit 2>/dev/null || true)"
           if [ -n "$report" ]; then
             total="$(jq '[.files[]?.mutants[]?] | length' "$report" 2>/dev/null || echo 0)"
-            echo "Stryker: testowalne mutanty=${total:-0} (kod wyjścia Stryker: ${stryker_exit})"
+            echo "Stryker: testable mutants=${total:-0} (Stryker exit code: ${stryker_exit})"
             if [ "${total:-0}" -eq 0 ]; then
-              echo "Stryker: 0 mutantów (pusty szkielet) -> bramka zielona"
+              echo "Stryker: 0 mutants (empty skeleton) -> gate green"
               exit 0
             fi
-            # Realne mutanty -> egzekwuj próg break=80 z stryker-config.json (kod wyjścia Stryker).
+            # Real mutants -> enforce the break=80 threshold from stryker-config.json (Stryker exit code).
             exit "${stryker_exit}"
           fi
-          # Brak raportu: rozróżnij znaną niekompatybilność MTP od realnej awarii (GAP-2 — nie greenować ślepo).
+          # No report: distinguish the known MTP incompatibility from a real failure (do not green blindly).
           if grep -q "Microsoft.Testing.Platform which is not yet supported by Stryker" stryker.log; then
-            echo "::warning::Stryker 4.x nie wspiera Microsoft.Testing.Platform (xUnit v3, issue #3094): bramka mutacji NIE egzekwuje progu >=80% do czasu rozwiązania (przełączenie projektów testowych na most VSTest lub wsparcie MTP w Stryker). Wymagane przed kodem rdzenia (Feature 1)."
+            echo "::warning::Stryker 4.x does not support Microsoft.Testing.Platform (xUnit v3, issue #3094): the mutation gate does NOT enforce the >=80% threshold until this is resolved (switch the test projects to the VSTest bridge, or wait for MTP support in Stryker). Required before core code lands."
             exit 0
           fi
-          echo "::error::Stryker zakończył się bez raportu z nieznanego powodu (kod ${stryker_exit}) — bramka czerwona."
+          echo "::error::Stryker finished without a report for an unknown reason (exit ${stryker_exit}) — gate red."
           exit "${stryker_exit}"
 
-  # ── Bramka 5: Skanowanie zależności (dotnet list --vulnerable) ────────────
+  # ── Gate 5: dependency scan (dotnet list --vulnerable) ────────────────────
   dependency-scan:
     name: "Gate 5 — dependency scan"
     runs-on: ubuntu-latest
@@ -120,16 +120,16 @@ jobs:
           cache-dependency-path: "**/packages.lock.json"
       - name: Restore (locked)
         run: dotnet restore Acta.slnx -p:ContinuousIntegrationBuild=true
-      # Guard SEC-3: parsowanie JSON (nie grep) + pipefail — kruchy grep mógłby przejść
-      # zielono przy błędzie skanu. Blokada na podatnościach High/Critical.
+      # Guard: parse JSON (not grep) + pipefail — a fragile grep could pass green on a scan
+      # error. Blocks on High/Critical vulnerabilities.
       - name: Vulnerable package scan
         run: |
           set -euo pipefail
           dotnet list Acta.slnx package --vulnerable --include-transitive --format json > vuln.json
           count="$(jq '[.projects[]?.frameworks[]? | ((.topLevelPackages // []) + (.transitivePackages // []))[] | .vulnerabilities[]? | select(.severity == "High" or .severity == "Critical")] | length' vuln.json)"
-          echo "Podatności High/Critical: ${count}"
+          echo "High/Critical vulnerabilities: ${count}"
           if [ "${count}" -gt 0 ]; then
             jq '.projects[]?.frameworks[]? | ((.topLevelPackages // []) + (.transitivePackages // []))[] | select(.vulnerabilities != null) | {id, resolvedVersion, vulnerabilities}' vuln.json
-            echo "::error::Znaleziono ${count} pakietów z podatnościami High/Critical — blokada PR."
+            echo "::error::Found ${count} packages with High/Critical vulnerabilities — PR blocked."
             exit 1
           fi

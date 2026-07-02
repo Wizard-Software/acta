@@ -12,7 +12,7 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
-  <!-- Dogfooding harnessu GWT (AK-7). -->
+  <!-- Dogfoods the Given-When-Then test harness. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Acta.Testing\Acta.Testing.csproj" />
   </ItemGroup>

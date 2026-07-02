@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Harness GWT (Spec.For<T>() — FR-15) → rdzeń. -->
+  <!-- Given-When-Then test harness (Spec.For<T>()) -> core. -->
   <ItemGroup>
     <ProjectReference Include="..\Acta\Acta.csproj" />
   </ItemGroup>

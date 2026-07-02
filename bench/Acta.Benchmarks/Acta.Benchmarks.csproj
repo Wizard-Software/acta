@@ -5,7 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
-  <!-- Benchmarki bazowe (NFR-1) → rdzeń + adapter. Wpięcie BenchmarkDotNet w Fazie 5 (TESTING-SPEC §7). -->
+  <!-- Baseline benchmarks -> core + adapter. BenchmarkDotNet will be wired up later. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Acta\Acta.csproj" />
     <ProjectReference Include="..\..\src\Acta.Postgres\Acta.Postgres.csproj" />

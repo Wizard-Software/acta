@@ -1,10 +1,10 @@
-# CodeQL — bramka 4 (SAST), TESTING-SPEC.md §8. Uzupełnia analizatory Roslyn security
-# (CA3xxx/CA5xxx jako błędy, już egzekwowane w bramce 1 przez Directory.Build.props).
-# build-mode: none — skan źródeł C# bez kompilacji (odporny na pusty szkielet).
-#   Fallback (OQ2/RISK-2), jeśli dana wersja codeql-action nie wspiera none dla csharp:
-#   ustaw `build-mode: manual` i dodaj krok `dotnet build Acta.slnx -c Release -p:ContinuousIntegrationBuild=true`
-#   między init a analyze.
-# Akcje przypięte do SHA (SEC-1); Dependabot (github-actions) utrzymuje je.
+# CodeQL — SAST gate. Complements the Roslyn security analyzers (CA3xxx/CA5xxx as errors,
+# already enforced in gate 1 via Directory.Build.props).
+# build-mode: none — scans C# sources without compiling (works on an empty skeleton).
+#   Fallback if a given codeql-action version does not support none for csharp:
+#   set `build-mode: manual` and add a `dotnet build Acta.slnx -c Release -p:ContinuousIntegrationBuild=true`
+#   step between init and analyze.
+# Actions are pinned to SHAs; Dependabot (github-actions) keeps them current.
 name: CodeQL
 
 on:
@@ -13,7 +13,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: "27 3 * * 1" # co poniedziałek 03:27 UTC
+    - cron: "27 3 * * 1" # every Monday 03:27 UTC
 
 permissions:
   contents: read

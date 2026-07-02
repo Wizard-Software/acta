@@ -12,7 +12,7 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
-  <!-- Skanuje graf assembly src/ (AK-2 Owner.Target) — referencja do wszystkich 4 projektów rdzenia. -->
+  <!-- Scans the src/ assembly graph — references all 4 core projects. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Acta.Abstractions\Acta.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Acta\Acta.csproj" />
