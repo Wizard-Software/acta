@@ -1,0 +1,19 @@
+{
+  "stryker-config": {
+    "solution": "Acta.slnx",
+    "project": "Acta.csproj",
+    "test-projects": [
+      "tests/Acta.Tests/Acta.Tests.csproj"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 80,
+      "break": 80
+    },
+    "reporters": [
+      "json",
+      "cleartext",
+      "markdown"
+    ]
+  }
+}
