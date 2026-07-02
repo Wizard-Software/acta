@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <!-- Skanuje graf assembly src/ (AK-2 Owner.Target) — referencja do wszystkich 4 projektów rdzenia. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Acta.Abstractions\Acta.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Acta\Acta.csproj" />
+    <ProjectReference Include="..\..\src\Acta.Postgres\Acta.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\Acta.Testing\Acta.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

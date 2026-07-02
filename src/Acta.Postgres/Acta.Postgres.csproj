@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Adapter Postgres → rdzeń (AK-2: adapter referuje port, nigdy odwrotnie). -->
+  <ItemGroup>
+    <ProjectReference Include="..\Acta\Acta.csproj" />
+  </ItemGroup>
+
+</Project>

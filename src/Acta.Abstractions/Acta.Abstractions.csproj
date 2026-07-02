@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Porty (10 grup) — zero zależności projektowych; wyłącznie BCL + System.Text.Json in-box (CONSTITUTION §2, AK-2 Owner.Target). -->
+
+</Project>

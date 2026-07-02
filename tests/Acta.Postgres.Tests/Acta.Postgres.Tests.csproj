@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <!-- Dziedziczy testy kontraktowe z Acta.Tests (TESTING-SPEC §2); adapter + harness. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Acta.Postgres\Acta.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\Acta.Testing\Acta.Testing.csproj" />
+    <ProjectReference Include="..\Acta.Tests\Acta.Tests.csproj" />
+  </ItemGroup>
+
+</Project>

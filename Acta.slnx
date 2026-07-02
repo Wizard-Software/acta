@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Acta.Abstractions/Acta.Abstractions.csproj" />
+    <Project Path="src/Acta/Acta.csproj" />
+    <Project Path="src/Acta.Postgres/Acta.Postgres.csproj" />
+    <Project Path="src/Acta.Testing/Acta.Testing.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Acta.Tests/Acta.Tests.csproj" />
+    <Project Path="tests/Acta.Postgres.Tests/Acta.Postgres.Tests.csproj" />
+    <Project Path="tests/Acta.ArchitectureTests/Acta.ArchitectureTests.csproj" />
+    <Project Path="tests/Acta.Testing.Tests/Acta.Testing.Tests.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/Acta.Benchmarks/Acta.Benchmarks.csproj" />
+  </Folder>
+</Solution>

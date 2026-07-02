@@ -1,0 +1,48 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+*.user
+*.suo
+*.userprefs
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+# UWAGA: packages.lock.json NIE jest ignorowany — musi być wersjonowany
+# (sedno bramki supply-chain R3-B4: deterministyczny graf zależności).
+
+# Test / coverage output
+[Tt]est[Rr]esults/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.trx
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+bench/results/
+
+# IDE — Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.sln.docstates
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
+
+# Forge — scaffolding orkiestracji/planowania (poza repozytorium produktu)
+.forge/
+.scratch/
+.claude/
+

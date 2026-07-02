@@ -1,0 +1,19 @@
+# Dependabot — bramka 5 (skanowanie/aktualizacje zależności), TESTING-SPEC.md §8.
+# Ekosystemy: NuGet (graf pakietów src/tests) + GitHub Actions (przypięte SHA workflow).
+# Aktualizacje github-actions domykają SEC-1 (utrzymanie przypiętych SHA akcji na bieżąco).
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "ci"

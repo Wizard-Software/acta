@@ -1,0 +1,47 @@
+# CodeQL — bramka 4 (SAST), TESTING-SPEC.md §8. Uzupełnia analizatory Roslyn security
+# (CA3xxx/CA5xxx jako błędy, już egzekwowane w bramce 1 przez Directory.Build.props).
+# build-mode: none — skan źródeł C# bez kompilacji (odporny na pusty szkielet).
+#   Fallback (OQ2/RISK-2), jeśli dana wersja codeql-action nie wspiera none dla csharp:
+#   ustaw `build-mode: manual` i dodaj krok `dotnet build Acta.slnx -c Release -p:ContinuousIntegrationBuild=true`
+#   między init a analyze.
+# Akcje przypięte do SHA (SEC-1); Dependabot (github-actions) utrzymuje je.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 3 * * 1" # co poniedziałek 03:27 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: "Gate 4 — CodeQL (SAST)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [csharp]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
+        with:
+          category: "/language:${{ matrix.language }}"
