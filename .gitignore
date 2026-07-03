@@ -25,6 +25,9 @@ coverage*.info
 BenchmarkDotNet.Artifacts/
 bench/results/
 
+# Mutation testing (Stryker.NET)
+StrykerOutput/
+
 # IDE — Visual Studio / Rider / VS Code
 .vs/
 .idea/
