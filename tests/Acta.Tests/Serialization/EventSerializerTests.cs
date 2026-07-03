@@ -272,4 +272,33 @@ public sealed class EventSerializerTests
 
         Assert.Equal(original, Assert.IsType<OrderPlaced>(sourced.Event));
     }
+
+    [Fact]
+    public void SerializeMetadata_NullMetadata_ThrowsArgumentNullException()
+    {
+        var serializer = new EventSerializer(CreateRegistry(), Options);
+
+        Assert.Throws<ArgumentNullException>(() => serializer.SerializeMetadata(null!));
+    }
+
+    [Fact]
+    public void DeserializeMetadata_NullJson_MessageDescribesNullResult()
+    {
+        var serializer = new EventSerializer(CreateRegistry(), Options);
+
+        var ex = Assert.Throws<JsonException>(() => serializer.DeserializeMetadata("null"u8.ToArray()));
+        Assert.Contains("deserialized to null", ex.Message);
+    }
+
+    [Fact]
+    public void DeserializeMetadata_UserNonStringToken_MessageNamesUserRef()
+    {
+        var serializer = new EventSerializer(CreateRegistry(), Options);
+        var baseline = Encoding.UTF8.GetString(serializer.SerializeMetadata(CreateMetadata(user: null)));
+        var mutated = baseline.Replace("\"User\":null", "\"User\":123");
+        var bytes = Encoding.UTF8.GetBytes(mutated);
+
+        var ex = Assert.Throws<JsonException>(() => serializer.DeserializeMetadata(bytes));
+        Assert.Contains("UserRef", ex.Message);
+    }
 }

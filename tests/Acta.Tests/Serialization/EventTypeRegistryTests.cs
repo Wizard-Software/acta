@@ -170,4 +170,92 @@ public sealed class EventTypeRegistryTests
         Assert.Contains("OrderPlaced", ex.Message);
         Assert.Equal("OrderPlaced", ex.EventType);
     }
+
+    [Fact]
+    public void Register_BlankEventType_MessageAndParamNameDescribeTheFailure()
+    {
+        var registry = new EventTypeRegistry();
+
+        var ex = Assert.Throws<ArgumentException>(() => registry.Register<OrderPlaced>("   "));
+        Assert.Equal("eventType", ex.ParamName);
+        Assert.Contains("null or blank", ex.Message);
+    }
+
+    [Fact]
+    public void Register_SchemaVersionBelowOne_MessageAndParamNameDescribeTheFailure()
+    {
+        var registry = new EventTypeRegistry();
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(
+            () => registry.Register<OrderPlaced>("OrderPlaced", 0));
+        Assert.Equal("schemaVersion", ex.ParamName);
+        Assert.Contains("Schema version", ex.Message);
+    }
+
+    [Fact]
+    public void Register_DuplicateEventType_MessageNamesTheEventType()
+    {
+        var registry = new EventTypeRegistry().Register<OrderPlaced>("Order");
+
+        var ex = Assert.Throws<ArgumentException>(() => registry.Register<OrderShipped>("Order"));
+        Assert.Contains("Order", ex.Message);
+        Assert.Contains("already registered", ex.Message);
+    }
+
+    [Fact]
+    public void Register_DuplicateClrType_MessageNamesTheClrTypeAndExistingEventType()
+    {
+        var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
+
+        var ex = Assert.Throws<ArgumentException>(() => registry.Register<OrderPlaced>("OrderPlacedAgain"));
+        Assert.Contains("already registered as event type", ex.Message);
+        Assert.Contains("OrderPlaced", ex.Message);
+    }
+
+    [Fact]
+    public void TryResolveClrType_RegisteredEventType_ReturnsTrueAndClrType()
+    {
+        var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
+
+        Assert.True(registry.TryResolveClrType("OrderPlaced", out var clrType));
+        Assert.Equal(typeof(OrderPlaced), clrType);
+    }
+
+    [Fact]
+    public void TryResolveEventType_RegisteredClrType_ReturnsTrueWithNameAndSchemaVersion()
+    {
+        var registry = new EventTypeRegistry().Register<OrderShipped>("OrderShipped", 4);
+
+        Assert.True(registry.TryResolveEventType(typeof(OrderShipped), out var eventType, out var schemaVersion));
+        Assert.Equal("OrderShipped", eventType);
+        Assert.Equal(4, schemaVersion);
+    }
+
+    [Fact]
+    public void TryResolveEventType_UnregisteredClrType_ReturnsFalseWithDefaults()
+    {
+        var registry = new EventTypeRegistry();
+
+        Assert.False(registry.TryResolveEventType(typeof(OrderPlaced), out var eventType, out var schemaVersion));
+        Assert.Null(eventType);
+        Assert.Equal(0, schemaVersion);
+    }
+
+    [Fact]
+    public void SerializePayload_NullEvent_ThrowsArgumentNullException()
+    {
+        var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
+
+        Assert.Throws<ArgumentNullException>(() => registry.SerializePayload(null!, Options));
+    }
+
+    [Fact]
+    public void UnknownEventTypeException_ForClrType_MessageAndEventTypeUseFullName()
+    {
+        var ex = new UnknownEventTypeException(typeof(OrderPlaced));
+
+        Assert.Contains("not registered", ex.Message);
+        Assert.Contains(typeof(OrderPlaced).ToString(), ex.Message);
+        Assert.Equal(typeof(OrderPlaced).FullName, ex.EventType);
+    }
 }
