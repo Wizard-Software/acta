@@ -17,3 +17,10 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "ci"
+    # Keep the paired codeql-action steps (init + analyze) on the same version:
+    # bumping only one half breaks CodeQL ("Loaded a configuration file for
+    # version X, but running version Y"). Grouping lands both in one PR.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
