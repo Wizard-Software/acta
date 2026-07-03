@@ -189,10 +189,17 @@
         "dependencies": {
           "Acta": "[1.0.0, )",
           "Acta.Testing": "[1.0.0, )",
+          "CsCheck": "[4.7.0, )",
           "Microsoft.NET.Test.Sdk": "[18.7.0, )",
           "xunit.runner.visualstudio": "[3.1.5, )",
           "xunit.v3": "[3.2.2, )"
         }
+      },
+      "CsCheck": {
+        "type": "CentralTransitive",
+        "requested": "[4.7.0, )",
+        "resolved": "4.7.0",
+        "contentHash": "j1ddNwZJHtuXJo0haeDtEX/j/iDJYLlZdIvaEmb7ftxTN9p4e5/jn6hYGXH/Em6RFfDRGWaNQ17LOMR3MhYWwA=="
       }
     }
   }
