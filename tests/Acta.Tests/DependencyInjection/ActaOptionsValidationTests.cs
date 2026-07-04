@@ -1,5 +1,7 @@
 using Xunit;
 
+using System.Reflection;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -80,6 +82,42 @@ public sealed class ActaOptionsValidationTests
         var options = provider.GetRequiredService<IOptions<ActaOptions>>();
 
         Invoking(() => options.Value).Should().Throw<OptionsValidationException>();
+    }
+
+    [Fact]
+    public void Validate_SerializerOptionsNull_FailureMessageStatesSerializerOptionsMustNotBeNull()
+    {
+        using var provider = BuildProvider(new ListLoggerProvider(), o => o.SerializerOptions = null!);
+        var validator = provider.GetRequiredService<IStartupValidator>();
+
+        Invoking(validator.Validate).Should().Throw<OptionsValidationException>()
+            .WithMessage("*SerializerOptions must not be null.*");
+    }
+
+    [Fact]
+    public void Validate_EventsNull_FailureMessageStatesEventsMustNotBeNull()
+    {
+        using var provider = BuildProvider(new ListLoggerProvider(), ForceEventsNull);
+        var validator = provider.GetRequiredService<IStartupValidator>();
+
+        Invoking(validator.Validate).Should().Throw<OptionsValidationException>()
+            .WithMessage("*Events must not be null.*");
+    }
+
+    /// <summary>
+    /// Forces <see cref="ActaOptions.Events"/> to <see langword="null"/> via its compiler-generated
+    /// backing field. <see cref="ActaOptions.Events"/> is a get-only auto-property (no public or
+    /// internal setter), so the null branch validated at <c>ActaOptionsValidator.Validate</c> is
+    /// unreachable through the public API — this reflection shim is the only way to exercise that
+    /// defensive check from a test without modifying production code.
+    /// </summary>
+    private static void ForceEventsNull(ActaOptions options)
+    {
+        var backingField = typeof(ActaOptions).GetField("<Events>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException(
+                "ActaOptions.Events backing field not found by its compiler-generated name — the property shape changed.");
+
+        backingField.SetValue(options, null);
     }
 
     [Fact]

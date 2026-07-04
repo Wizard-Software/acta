@@ -1,6 +1,7 @@
 using Xunit;
 
 using Acta.Abstractions;
+using Acta.Aggregates;
 using Acta.InMemory;
 using Acta.Serialization;
 using Acta.Tests.TestSupport;
@@ -347,6 +348,131 @@ public sealed class AggregateRepositoryTests
         session.Aggregate.Increment();
 
         await Awaiting(() => session.SaveAsync(Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>();
+    }
+
+    [Fact]
+    public void Constructor_NullStore_ThrowsArgumentNullException()
+    {
+        var serializer = CounterEventsRegistry.CreateSerializer();
+        var metadataFactory = CounterEventsRegistry.FixedMetadataFactory();
+
+        var ex = Invoking(() => new AggregateRepository<CounterAggregate>(null!, serializer, metadataFactory))
+            .Should().Throw<ArgumentNullException>().Which;
+
+        ex.ParamName.Should().Be("store");
+    }
+
+    [Fact]
+    public void Constructor_NullSerializer_ThrowsArgumentNullException()
+    {
+        var store = new InMemoryEventStore();
+        var metadataFactory = CounterEventsRegistry.FixedMetadataFactory();
+
+        var ex = Invoking(() => new AggregateRepository<CounterAggregate>(store, null!, metadataFactory))
+            .Should().Throw<ArgumentNullException>().Which;
+
+        ex.ParamName.Should().Be("serializer");
+    }
+
+    [Fact]
+    public void Constructor_NullMetadataFactory_ThrowsArgumentNullException()
+    {
+        var store = new InMemoryEventStore();
+        var serializer = CounterEventsRegistry.CreateSerializer();
+
+        var ex = Invoking(() => new AggregateRepository<CounterAggregate>(store, serializer, null!))
+            .Should().Throw<ArgumentNullException>().Which;
+
+        ex.ParamName.Should().Be("metadataFactory");
+    }
+
+    [Fact]
+    public async Task Constructor_CustomEventIdFactory_IsUsedInsteadOfTheDefaultDerivation()
+    {
+        var store = new InMemoryEventStore();
+        var serializer = CounterEventsRegistry.CreateSerializer();
+        var metadataFactory = CounterEventsRegistry.FixedMetadataFactory();
+        var customEventId = Guid.NewGuid();
+        var repository = new AggregateRepository<CounterAggregate>(store, serializer, metadataFactory, (_, _, _) => customEventId);
+        var writer = new CounterAggregate();
+        writer.AssignId("counter-1");
+        writer.Increment();
+
+        await repository.SaveAsync(writer, ExpectedVersion.NoStream, Ct);
+
+        var stored = await ToListAsync(store.ReadStreamAsync("counter-1", ct: Ct));
+        stored[0].EventId.Should().Be(customEventId);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_EmptyId_ThrowsArgumentExceptionNamingTheIdParameter()
+    {
+        var repository = CounterEventsRegistry.CreateRepository();
+
+        var ex = (await Awaiting(() => repository.GetByIdAsync(string.Empty, Ct).AsTask())
+            .Should().ThrowAsync<ArgumentException>()).Which;
+
+        ex.ParamName.Should().Be("id");
+    }
+
+    [Fact]
+    public async Task FetchForWritingAsync_EmptyId_ThrowsArgumentExceptionNamingTheIdParameter()
+    {
+        var repository = CounterEventsRegistry.CreateRepository();
+
+        var ex = (await Awaiting(() => repository.FetchForWritingAsync(string.Empty, Ct).AsTask())
+            .Should().ThrowAsync<ArgumentException>()).Which;
+
+        ex.ParamName.Should().Be("id");
+    }
+
+    [Fact]
+    public async Task SaveAsync_NullAggregate_ThrowsArgumentNullException()
+    {
+        var repository = CounterEventsRegistry.CreateRepository();
+
+        await Awaiting(() => repository.SaveAsync(null!, ExpectedVersion.NoStream, Ct).AsTask())
+            .Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    /// <summary>
+    /// Sharper than <see cref="SaveAsync_EmptyAggregateId_ThrowsArgumentException"/>: the store's own
+    /// <c>AppendAsync</c> guard would ALSO throw an <see cref="ArgumentException"/> for an empty
+    /// stream id (same exception type), so asserting the type alone cannot tell "the repository's
+    /// own guard fired" from "the repository's guard was removed and the store's guard caught it
+    /// instead". The <see cref="ArgumentException.ParamName"/> distinguishes them: the repository's
+    /// guard names <c>aggregate.Id</c>; the store's fallback would name <c>streamId</c>.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_EmptyAggregateId_ExceptionNamesTheAggregateIdParameter()
+    {
+        var repository = CounterEventsRegistry.CreateRepository();
+        var aggregate = new CounterAggregate();
+        aggregate.AssignId(string.Empty);
+        aggregate.Increment();
+
+        var ex = (await Awaiting(() => repository.SaveAsync(aggregate, ExpectedVersion.NoStream, Ct).AsTask())
+            .Should().ThrowAsync<ArgumentException>()).Which;
+
+        ex.ParamName.Should().Be("aggregate.Id");
+    }
+
+    [Fact]
+    public async Task SaveAsync_DefaultEventIdFactory_MatchesTheFnv1aDerivationFromMetadataStreamAndIndex()
+    {
+        var store = new InMemoryEventStore();
+        var metadataFactory = CounterEventsRegistry.FixedMetadataFactory();
+        var repository = CounterEventsRegistry.CreateRepository(store, metadataFactory);
+        var writer = new CounterAggregate();
+        writer.AssignId("counter-1");
+        writer.Increment();
+
+        await repository.SaveAsync(writer, ExpectedVersion.NoStream, Ct);
+
+        var metadata = metadataFactory();
+        var expectedEventId = TestEvents.DeterministicId($"{metadata.MessageId:N}:counter-1:0");
+        var stored = await ToListAsync(store.ReadStreamAsync("counter-1", ct: Ct));
+        stored[0].EventId.Should().Be(expectedEventId);
     }
 
     /// <summary>Records the <c>expectedVersion</c> passed to the last <c>AppendAsync</c> call, delegating everything else.</summary>
