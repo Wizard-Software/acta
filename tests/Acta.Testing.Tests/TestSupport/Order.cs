@@ -11,6 +11,7 @@ namespace Acta.Testing.Tests.TestSupport;
 /// </summary>
 public sealed class Order : AggregateRoot
 {
+    private bool _placed;
     private bool _cancelled;
 
     /// <summary>Whether the order has been cancelled.</summary>
@@ -41,11 +42,16 @@ public sealed class Order : AggregateRoot
     /// <param name="quantity">The quantity ordered. Must be positive.</param>
     /// <exception cref="ArgumentException"><paramref name="sku"/> is null or whitespace.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="quantity"/> is zero or negative.</exception>
-    /// <exception cref="InvalidOperationException">The order has already been cancelled.</exception>
+    /// <exception cref="InvalidOperationException">The order has not been placed, or has already been cancelled.</exception>
     public void AddLine(string sku, int quantity)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sku);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(quantity);
+
+        if (!_placed)
+        {
+            throw new InvalidOperationException("Cannot add a line to an order that has not been placed.");
+        }
 
         if (_cancelled)
         {
@@ -57,9 +63,14 @@ public sealed class Order : AggregateRoot
 
     /// <summary>Command: cancels the order. Records an <see cref="OrderCancelled"/> event.</summary>
     /// <param name="reason">Why the order is being cancelled.</param>
-    /// <exception cref="InvalidOperationException">The order has already been cancelled.</exception>
+    /// <exception cref="InvalidOperationException">The order has not been placed, or has already been cancelled.</exception>
     public void Cancel(string reason)
     {
+        if (!_placed)
+        {
+            throw new InvalidOperationException("Cannot cancel an order that has not been placed.");
+        }
+
         if (_cancelled)
         {
             throw new InvalidOperationException("The order is already cancelled.");
@@ -75,6 +86,7 @@ public sealed class Order : AggregateRoot
         {
             case OrderPlaced placed:
                 Id = placed.OrderId;
+                _placed = true;
                 break;
             case OrderLineAdded:
                 LineCount++;

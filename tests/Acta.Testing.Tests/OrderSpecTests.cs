@@ -61,6 +61,24 @@ public sealed class OrderSpecTests
     }
 
     [Fact]
+    public async Task Cancel_OnUnplacedOrder_ThrowsInvalidOperationException()
+    {
+        await Spec.For<Order>()
+            .Given()
+            .When(o => o.Cancel("never placed"))
+            .ThenThrows<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task AddLine_OnUnplacedOrder_ThrowsInvalidOperationException()
+    {
+        await Spec.For<Order>()
+            .Given()
+            .When(o => o.AddLine("SKU-7", 1))
+            .ThenThrows<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task AddLine_NonPositiveQuantity_ThrowsArgumentOutOfRangeException()
     {
         await Spec.For<Order>()
