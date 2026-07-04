@@ -4,4 +4,11 @@
     <ProjectReference Include="..\Acta.Abstractions\Acta.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Composition root (task 3.3 — AddActa): AK-2 permits Microsoft.Extensions.* in the core. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
 </Project>

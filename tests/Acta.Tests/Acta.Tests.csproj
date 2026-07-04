@@ -11,6 +11,8 @@
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="CsCheck" />
+    <!-- Needed for ServiceCollection/BuildServiceProvider in AddActa DI tests (task 3.3). -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
 
   <ItemGroup>
