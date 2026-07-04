@@ -186,4 +186,37 @@ public sealed class AddActaTests
         loaded.Should().NotBeNull();
         loaded.Applied.Should().Be(1);
     }
+
+    [Fact]
+    public void AddActa_NullServices_ThrowsArgumentNullException()
+    {
+        IServiceCollection? services = null;
+
+        Invoking(() => services!.AddActa()).Should().Throw<ArgumentNullException>()
+            .Which.ParamName.Should().Be("services");
+    }
+
+    [Fact]
+    public void AddActa_TimeProviderRegisteredInContainer_MetadataFactoryUsesRegisteredTimeProviderNotSystemClock()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
+        services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+
+        var fixedInstant = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        services.AddSingleton<TimeProvider>(new FixedTimeProvider(fixedInstant));
+
+        services.AddActa();
+        using var provider = services.BuildServiceProvider();
+
+        var factory = provider.GetRequiredService<Func<EventMetadata>>();
+        var metadata = factory();
+
+        metadata.Timestamp.Should().Be(fixedInstant);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset instant) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => instant;
+    }
 }

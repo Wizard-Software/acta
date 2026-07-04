@@ -301,4 +301,26 @@ public sealed class EventSerializerTests
         Invoking(() => serializer.DeserializeMetadata(bytes))
             .Should().Throw<JsonException>().WithMessage("*UserRef*");
     }
+
+    [Fact]
+    public void DeserializeMetadata_UserNonStringToken_ThrowsWithConverterOwnMessage()
+    {
+        var serializer = new EventSerializer(CreateRegistry(), Options);
+        var baseline = Encoding.UTF8.GetString(serializer.SerializeMetadata(CreateMetadata(user: null)));
+        var mutated = baseline.Replace("\"User\":null", "\"User\":123");
+        var bytes = Encoding.UTF8.GetBytes(mutated);
+
+        // Exact (non-wildcard) match, deliberately: System.Text.Json substitutes a generic
+        // "The JSON value could not be converted to ... Path: $.User | ..." message whenever a
+        // converter-thrown JsonException carries a null/empty Message (its internal
+        // AppendPathInformation flag flips on for empty messages). That generic fallback text
+        // happens to *also* contain the substring "UserRef" (via "...Nullable`1[UserRef]..."), so
+        // a "*UserRef*" wildcard (see the test above) passes for either the converter's own
+        // message or the framework's unrelated fallback — it cannot tell them apart. Pinning the
+        // exact, full text asserts the converter's own guard-clause message was actually produced,
+        // and fails if either the throw is removed or its string literal is emptied.
+        Invoking(() => serializer.DeserializeMetadata(bytes))
+            .Should().Throw<JsonException>()
+            .WithMessage("Expected a JSON string value for UserRef.");
+    }
 }

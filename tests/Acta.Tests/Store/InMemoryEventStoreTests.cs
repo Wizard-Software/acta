@@ -33,6 +33,12 @@ public sealed class InMemoryEventStoreTests
         return result;
     }
 
+    /// <summary>A <see cref="TimeProvider"/> that always reports a fixed, caller-supplied instant.</summary>
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
     [Fact]
     public async Task AppendAsync_NewStream_AssignsSequentialVersionsAndGlobalPositions()
     {
@@ -424,5 +430,95 @@ public sealed class InMemoryEventStoreTests
 
         await Awaiting(
             () => store.AppendAsync("order-1", ExpectedVersion.Any, null!, Ct).AsTask()).Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task Constructor_ExplicitTimeProvider_IsUsedForStoredEventTimestamps()
+    {
+        var fixedTime = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var store = new InMemoryEventStore(new FixedTimeProvider(fixedTime));
+
+        await store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct);
+
+        var stored = await ToListAsync(store.ReadStreamAsync("order-1", ct: Ct));
+        stored[0].Timestamp.Should().Be(fixedTime);
+    }
+
+    [Fact]
+    public void ReadStreamAsync_NullStreamId_ThrowsArgumentNullException()
+    {
+        var store = new InMemoryEventStore();
+
+        Invoking(() => store.ReadStreamAsync(null!, ct: Ct)).Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task ReadAllAsync_CancelledTokenOnEmptyStore_ThrowsOperationCanceledException()
+    {
+        var store = new InMemoryEventStore();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // No events exist, so the foreach body (and its own cancellation check) never runs —
+        // this can only throw via the upfront check made before the store snapshot is even read.
+        await Awaiting(async () =>
+        {
+            await foreach (var _ in store.ReadAllAsync(GlobalPosition.Start, ct: cts.Token))
+            {
+            }
+        }).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ReadAllAsync_TokenCancelledAfterFirstItem_ThrowsOperationCanceledExceptionBeforeSecondItem()
+    {
+        var store = new InMemoryEventStore();
+        await store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(2), Ct);
+        using var cts = new CancellationTokenSource();
+
+        // The upfront cancellation check passes (token not yet cancelled), so only the
+        // per-iteration check inside the read loop can observe the mid-enumeration cancellation.
+        await Awaiting(async () =>
+        {
+            await foreach (var _ in store.ReadAllAsync(GlobalPosition.Start, ct: cts.Token))
+            {
+                cts.Cancel();
+            }
+        }).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ReadStreamAsync_CancelledTokenOnNonExistentStream_ThrowsOperationCanceledException()
+    {
+        var store = new InMemoryEventStore();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // The stream has no events, so the foreach body (and its own cancellation check) never
+        // runs — this can only throw via the upfront check made before the stream lookup.
+        await Awaiting(async () =>
+        {
+            await foreach (var _ in store.ReadStreamAsync("ghost", ct: cts.Token))
+            {
+            }
+        }).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ReadStreamAsync_TokenCancelledAfterFirstItem_ThrowsOperationCanceledExceptionBeforeSecondItem()
+    {
+        var store = new InMemoryEventStore();
+        await store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(2), Ct);
+        using var cts = new CancellationTokenSource();
+
+        // The upfront cancellation check passes (token not yet cancelled), so only the
+        // per-iteration check inside the read loop can observe the mid-enumeration cancellation.
+        await Awaiting(async () =>
+        {
+            await foreach (var _ in store.ReadStreamAsync("order-1", ct: cts.Token))
+            {
+                cts.Cancel();
+            }
+        }).Should().ThrowAsync<OperationCanceledException>();
     }
 }
