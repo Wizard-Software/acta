@@ -9,9 +9,9 @@ public sealed class ExpectedVersionTests
     [Fact]
     public void Constants_HaveBindingSentinelValues()
     {
-        Assert.Equal(-2, ExpectedVersion.Any);
-        Assert.Equal(-1, ExpectedVersion.NoStream);
-        Assert.Equal(0, ExpectedVersion.EmptyStream);
-        Assert.Equal(-3, ExpectedVersion.StreamExists);
+        ExpectedVersion.Any.Should().Be(-2);
+        ExpectedVersion.NoStream.Should().Be(-1);
+        ExpectedVersion.EmptyStream.Should().Be(0);
+        ExpectedVersion.StreamExists.Should().Be(-3);
     }
 }

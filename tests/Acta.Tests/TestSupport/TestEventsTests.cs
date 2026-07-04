@@ -8,19 +8,19 @@ public sealed class TestEventsTests
     [Fact]
     public void DeterministicId_SameSeed_ReturnsSameGuid()
     {
-        Assert.Equal(TestEvents.DeterministicId("cmd-1"), TestEvents.DeterministicId("cmd-1"));
+        TestEvents.DeterministicId("cmd-1").Should().Be(TestEvents.DeterministicId("cmd-1"));
     }
 
     [Fact]
     public void DeterministicId_DifferentSeeds_ReturnDifferentGuids()
     {
-        Assert.NotEqual(TestEvents.DeterministicId("cmd-1"), TestEvents.DeterministicId("cmd-2"));
+        TestEvents.DeterministicId("cmd-2").Should().NotBe(TestEvents.DeterministicId("cmd-1"));
     }
 
     [Fact]
     public void OrderPlaced_NoArgument_ReturnsDistinctEventIds()
     {
-        Assert.NotEqual(TestEvents.OrderPlaced().EventId, TestEvents.OrderPlaced().EventId);
+        TestEvents.OrderPlaced().EventId.Should().NotBe(TestEvents.OrderPlaced().EventId);
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public sealed class TestEventsTests
     {
         var id = TestEvents.DeterministicId("cmd-42");
 
-        Assert.Equal(id, TestEvents.OrderPlaced(id).EventId);
+        TestEvents.OrderPlaced(id).EventId.Should().Be(id);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class TestEventsTests
     {
         var batch = TestEvents.Distinct(5);
 
-        Assert.Equal(5, batch.Length);
-        Assert.Equal(5, batch.Select(e => e.EventId).Distinct().Count());
+        batch.Length.Should().Be(5);
+        batch.Select(e => e.EventId).Distinct().Count().Should().Be(5);
     }
 }

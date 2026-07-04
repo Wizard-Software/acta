@@ -32,10 +32,10 @@ public sealed class AggregateApplyTotalityPropertyTests
 
             var exception = Record.Exception(() => aggregate.LoadFromHistory(history));
 
-            Assert.Null(exception);
-            Assert.Equal(history.Length - 1, aggregate.Version);
-            Assert.Empty(aggregate.UncommittedEvents);
-            Assert.Equal(history.Count(e => e is UnknownEvent), aggregate.Ignored);
+            exception.Should().BeNull();
+            aggregate.Version.Should().Be(history.Length - 1);
+            aggregate.UncommittedEvents.Should().BeEmpty();
+            aggregate.Ignored.Should().Be(history.Count(e => e is UnknownEvent));
         });
     }
 
@@ -46,7 +46,7 @@ public sealed class AggregateApplyTotalityPropertyTests
 
         aggregate.LoadFromHistory([]);
 
-        Assert.Equal(-1, aggregate.Version);
+        aggregate.Version.Should().Be(-1);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class AggregateApplyTotalityPropertyTests
 
         aggregate.LoadFromHistory([new Incremented()]);
 
-        Assert.Equal(0, aggregate.Version);
+        aggregate.Version.Should().Be(0);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class AggregateApplyTotalityPropertyTests
         // scale would indicate a regression to a recursive implementation.
         var exception = Record.Exception(() => aggregate.LoadFromHistory(history));
 
-        Assert.Null(exception);
-        Assert.Equal(EventCount - 1, aggregate.Version);
+        exception.Should().BeNull();
+        aggregate.Version.Should().Be(EventCount - 1);
     }
 }

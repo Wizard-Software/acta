@@ -21,8 +21,8 @@ public sealed class EventTypeRegistryTests
 
         var returned = registry.Register<OrderPlaced>("OrderPlaced");
 
-        Assert.Same(registry, returned);
-        Assert.Equal(1, registry.Count);
+        returned.Should().BeSameAs(registry);
+        registry.Count.Should().Be(1);
     }
 
     [Fact]
@@ -30,7 +30,7 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderPlaced>("Order");
 
-        Assert.Throws<ArgumentException>(() => registry.Register<OrderShipped>("Order"));
+        Invoking(() => registry.Register<OrderShipped>("Order")).Should().Throw<ArgumentException>();
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
 
-        Assert.Throws<ArgumentException>(() => registry.Register<OrderPlaced>("OrderPlacedAgain"));
+        Invoking(() => registry.Register<OrderPlaced>("OrderPlacedAgain")).Should().Throw<ArgumentException>();
     }
 
     [Theory]
@@ -49,7 +49,7 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        Assert.Throws<ArgumentException>(() => registry.Register<OrderPlaced>(eventType!));
+        Invoking(() => registry.Register<OrderPlaced>(eventType!)).Should().Throw<ArgumentException>();
     }
 
     [Theory]
@@ -59,8 +59,8 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => registry.Register<OrderPlaced>("OrderPlaced", schemaVersion));
+        Invoking(() => registry.Register<OrderPlaced>("OrderPlaced", schemaVersion))
+            .Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]
@@ -70,8 +70,8 @@ public sealed class EventTypeRegistryTests
 
         var (eventType, schemaVersion) = registry.ResolveEventType(typeof(OrderPlaced));
 
-        Assert.Equal(nameof(OrderPlaced), eventType);
-        Assert.Equal(1, schemaVersion);
+        eventType.Should().Be(nameof(OrderPlaced));
+        schemaVersion.Should().Be(1);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
 
-        Assert.Equal(typeof(OrderPlaced), registry.ResolveClrType("OrderPlaced"));
+        registry.ResolveClrType("OrderPlaced").Should().Be(typeof(OrderPlaced));
     }
 
     [Fact]
@@ -87,8 +87,8 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        var ex = Assert.Throws<UnknownEventTypeException>(() => registry.ResolveClrType("Ghost"));
-        Assert.Equal("Ghost", ex.EventType);
+        var ex = Invoking(() => registry.ResolveClrType("Ghost")).Should().Throw<UnknownEventTypeException>().Which;
+        ex.EventType.Should().Be("Ghost");
     }
 
     [Fact]
@@ -98,8 +98,8 @@ public sealed class EventTypeRegistryTests
 
         var (eventType, schemaVersion) = registry.ResolveEventType(typeof(OrderShipped));
 
-        Assert.Equal("OrderShipped", eventType);
-        Assert.Equal(3, schemaVersion);
+        eventType.Should().Be("OrderShipped");
+        schemaVersion.Should().Be(3);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        Assert.Throws<UnknownEventTypeException>(() => registry.ResolveEventType(typeof(OrderPlaced)));
+        Invoking(() => registry.ResolveEventType(typeof(OrderPlaced))).Should().Throw<UnknownEventTypeException>();
     }
 
     [Fact]
@@ -115,8 +115,8 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        Assert.False(registry.TryResolveClrType("Ghost", out var clrType));
-        Assert.Null(clrType);
+        registry.TryResolveClrType("Ghost", out var clrType).Should().BeFalse();
+        clrType.Should().BeNull();
     }
 
     [Fact]
@@ -127,9 +127,9 @@ public sealed class EventTypeRegistryTests
 
         var result = registry.Deserialize("OrderPlaced", payload, Options);
 
-        var order = Assert.IsType<OrderPlaced>(result);
-        Assert.Equal("o-1", order.OrderId);
-        Assert.Equal("c-1", order.CustomerId);
+        var order = result.Should().BeOfType<OrderPlaced>().Subject;
+        order.OrderId.Should().Be("o-1");
+        order.CustomerId.Should().Be("c-1");
     }
 
     [Fact]
@@ -138,7 +138,7 @@ public sealed class EventTypeRegistryTests
         var registry = new EventTypeRegistry();
         var payload = JsonSerializer.SerializeToUtf8Bytes(new OrderPlaced("o-1", "c-1"), Options);
 
-        Assert.Throws<UnknownEventTypeException>(() => registry.Deserialize("OrderPlaced", payload, Options));
+        Invoking(() => registry.Deserialize("OrderPlaced", payload, Options)).Should().Throw<UnknownEventTypeException>();
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class EventTypeRegistryTests
         var payload = registry.SerializePayload(original, Options);
         var roundTripped = registry.Deserialize("OrderPlaced", payload, Options);
 
-        Assert.Equal(original, roundTripped);
+        roundTripped.Should().Be(original);
     }
 
     [Fact]
@@ -158,8 +158,8 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        Assert.Throws<UnknownEventTypeException>(
-            () => registry.SerializePayload(new OrderPlaced("o-1", "c-1"), Options));
+        Invoking(() => registry.SerializePayload(new OrderPlaced("o-1", "c-1"), Options))
+            .Should().Throw<UnknownEventTypeException>();
     }
 
     [Fact]
@@ -167,8 +167,8 @@ public sealed class EventTypeRegistryTests
     {
         var ex = new UnknownEventTypeException("OrderPlaced");
 
-        Assert.Contains("OrderPlaced", ex.Message);
-        Assert.Equal("OrderPlaced", ex.EventType);
+        ex.Message.Should().Contain("OrderPlaced");
+        ex.EventType.Should().Be("OrderPlaced");
     }
 
     [Fact]
@@ -176,9 +176,9 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        var ex = Assert.Throws<ArgumentException>(() => registry.Register<OrderPlaced>("   "));
-        Assert.Equal("eventType", ex.ParamName);
-        Assert.Contains("null or blank", ex.Message);
+        var ex = Invoking(() => registry.Register<OrderPlaced>("   ")).Should().Throw<ArgumentException>().Which;
+        ex.ParamName.Should().Be("eventType");
+        ex.Message.Should().Contain("null or blank");
     }
 
     [Fact]
@@ -186,10 +186,10 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        var ex = Assert.Throws<ArgumentOutOfRangeException>(
-            () => registry.Register<OrderPlaced>("OrderPlaced", 0));
-        Assert.Equal("schemaVersion", ex.ParamName);
-        Assert.Contains("Schema version", ex.Message);
+        var ex = Invoking(() => registry.Register<OrderPlaced>("OrderPlaced", 0))
+            .Should().Throw<ArgumentOutOfRangeException>().Which;
+        ex.ParamName.Should().Be("schemaVersion");
+        ex.Message.Should().Contain("Schema version");
     }
 
     [Fact]
@@ -197,9 +197,9 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderPlaced>("Order");
 
-        var ex = Assert.Throws<ArgumentException>(() => registry.Register<OrderShipped>("Order"));
-        Assert.Contains("Order", ex.Message);
-        Assert.Contains("already registered", ex.Message);
+        var ex = Invoking(() => registry.Register<OrderShipped>("Order")).Should().Throw<ArgumentException>().Which;
+        ex.Message.Should().Contain("Order");
+        ex.Message.Should().Contain("already registered");
     }
 
     [Fact]
@@ -207,9 +207,9 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
 
-        var ex = Assert.Throws<ArgumentException>(() => registry.Register<OrderPlaced>("OrderPlacedAgain"));
-        Assert.Contains("already registered as event type", ex.Message);
-        Assert.Contains("OrderPlaced", ex.Message);
+        var ex = Invoking(() => registry.Register<OrderPlaced>("OrderPlacedAgain")).Should().Throw<ArgumentException>().Which;
+        ex.Message.Should().Contain("already registered as event type");
+        ex.Message.Should().Contain("OrderPlaced");
     }
 
     [Fact]
@@ -217,8 +217,8 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
 
-        Assert.True(registry.TryResolveClrType("OrderPlaced", out var clrType));
-        Assert.Equal(typeof(OrderPlaced), clrType);
+        registry.TryResolveClrType("OrderPlaced", out var clrType).Should().BeTrue();
+        clrType.Should().Be(typeof(OrderPlaced));
     }
 
     [Fact]
@@ -226,9 +226,9 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderShipped>("OrderShipped", 4);
 
-        Assert.True(registry.TryResolveEventType(typeof(OrderShipped), out var eventType, out var schemaVersion));
-        Assert.Equal("OrderShipped", eventType);
-        Assert.Equal(4, schemaVersion);
+        registry.TryResolveEventType(typeof(OrderShipped), out var eventType, out var schemaVersion).Should().BeTrue();
+        eventType.Should().Be("OrderShipped");
+        schemaVersion.Should().Be(4);
     }
 
     [Fact]
@@ -236,9 +236,9 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry();
 
-        Assert.False(registry.TryResolveEventType(typeof(OrderPlaced), out var eventType, out var schemaVersion));
-        Assert.Null(eventType);
-        Assert.Equal(0, schemaVersion);
+        registry.TryResolveEventType(typeof(OrderPlaced), out var eventType, out var schemaVersion).Should().BeFalse();
+        eventType.Should().BeNull();
+        schemaVersion.Should().Be(0);
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public sealed class EventTypeRegistryTests
     {
         var registry = new EventTypeRegistry().Register<OrderPlaced>("OrderPlaced");
 
-        Assert.Throws<ArgumentNullException>(() => registry.SerializePayload(null!, Options));
+        Invoking(() => registry.SerializePayload(null!, Options)).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -254,8 +254,8 @@ public sealed class EventTypeRegistryTests
     {
         var ex = new UnknownEventTypeException(typeof(OrderPlaced));
 
-        Assert.Contains("not registered", ex.Message);
-        Assert.Contains(typeof(OrderPlaced).ToString(), ex.Message);
-        Assert.Equal(typeof(OrderPlaced).FullName, ex.EventType);
+        ex.Message.Should().Contain("not registered");
+        ex.Message.Should().Contain(typeof(OrderPlaced).ToString());
+        ex.EventType.Should().Be(typeof(OrderPlaced).FullName);
     }
 }

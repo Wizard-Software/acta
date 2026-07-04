@@ -47,8 +47,8 @@ public abstract class EventStoreContractTests
 
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", ct: Ct));
         long[] expectedVersions = [0, 1, 2];
-        Assert.Equal(3, stored.Count);
-        Assert.Equal(expectedVersions, stored.Select(e => e.Version));
+        stored.Count.Should().Be(3);
+        stored.Select(e => e.Version).Should().Equal(expectedVersions);
     }
 
     // ---- Matrix: exact version (>= 1) ----
@@ -61,8 +61,8 @@ public abstract class EventStoreContractTests
 
         var result = await store.AppendAsync("order-1", 1, TestEvents.Distinct(1), Ct);
 
-        Assert.Equal(2, result.NextExpectedVersion);
-        Assert.False(result.Deduplicated);
+        result.NextExpectedVersion.Should().Be(2);
+        result.Deduplicated.Should().BeFalse();
     }
 
     [Fact]
@@ -71,12 +71,12 @@ public abstract class EventStoreContractTests
         var store = await CreateStoreAsync();
         await store.AppendAsync("order-1", ExpectedVersion.NoStream, TestEvents.Distinct(2), Ct); // last version 1
 
-        var ex = await Assert.ThrowsAsync<ConcurrencyException>(
-            () => store.AppendAsync("order-1", 5, TestEvents.Distinct(1), Ct).AsTask());
+        var ex = (await Awaiting(
+            () => store.AppendAsync("order-1", 5, TestEvents.Distinct(1), Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>()).Which;
 
-        Assert.Equal("order-1", ex.StreamId);
-        Assert.Equal(5, ex.ExpectedVersion);
-        Assert.Equal(1, ex.ActualVersion);
+        ex.StreamId.Should().Be("order-1");
+        ex.ExpectedVersion.Should().Be(5);
+        ex.ActualVersion.Should().Be(1);
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public abstract class EventStoreContractTests
         // Same EventId under an exact guard that would otherwise mismatch: dedup wins (before guard).
         var replay = await store.AppendAsync("order-1", 99, [e], Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
     }
 
     [Fact]
@@ -104,10 +104,10 @@ public abstract class EventStoreContractTests
         // Retry of the command with its original (now stale) exact expectedVersion = 1 → idempotent.
         var replay = await store.AppendAsync("order-1", 1, [e], Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
         // A dedup reports the stream's CURRENT head (no new event appended), not the original
         // append's version — AppendResult XML-doc; the head has since advanced to 3.
-        Assert.Equal(3, replay.NextExpectedVersion);
+        replay.NextExpectedVersion.Should().Be(3);
     }
 
     // ---- Matrix: Any ----
@@ -120,8 +120,8 @@ public abstract class EventStoreContractTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.Any, TestEvents.Distinct(1), Ct);
 
-        Assert.Equal(2, result.NextExpectedVersion);
-        Assert.False(result.Deduplicated);
+        result.NextExpectedVersion.Should().Be(2);
+        result.Deduplicated.Should().BeFalse();
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public abstract class EventStoreContractTests
 
         var replay = await store.AppendAsync("order-1", ExpectedVersion.Any, [e], Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
     }
 
     [Fact]
@@ -144,8 +144,8 @@ public abstract class EventStoreContractTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.Any, [TestEvents.OrderPlaced()], Ct);
 
-        Assert.False(result.Deduplicated);
-        Assert.Equal(1, result.NextExpectedVersion);
+        result.Deduplicated.Should().BeFalse();
+        result.NextExpectedVersion.Should().Be(1);
     }
 
     // ---- Matrix: NoStream ----
@@ -157,8 +157,8 @@ public abstract class EventStoreContractTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.NoStream, TestEvents.Distinct(1), Ct);
 
-        Assert.Equal(0, result.NextExpectedVersion);
-        Assert.False(result.Deduplicated);
+        result.NextExpectedVersion.Should().Be(0);
+        result.Deduplicated.Should().BeFalse();
     }
 
     [Fact]
@@ -167,11 +167,11 @@ public abstract class EventStoreContractTests
         var store = await CreateStoreAsync();
         await store.AppendAsync("order-1", ExpectedVersion.NoStream, TestEvents.Distinct(1), Ct); // version 0
 
-        var ex = await Assert.ThrowsAsync<ConcurrencyException>(
-            () => store.AppendAsync("order-1", ExpectedVersion.NoStream, TestEvents.Distinct(1), Ct).AsTask());
+        var ex = (await Awaiting(
+            () => store.AppendAsync("order-1", ExpectedVersion.NoStream, TestEvents.Distinct(1), Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>()).Which;
 
-        Assert.Equal(ExpectedVersion.NoStream, ex.ExpectedVersion);
-        Assert.Equal(0, ex.ActualVersion);
+        ex.ExpectedVersion.Should().Be(ExpectedVersion.NoStream);
+        ex.ActualVersion.Should().Be(0);
     }
 
     [Fact]
@@ -185,7 +185,7 @@ public abstract class EventStoreContractTests
         // Retry of the first command with its original NoStream guard (now stale) → dedup before guard.
         var replay = await store.AppendAsync("order-1", ExpectedVersion.NoStream, [e], Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
     }
 
     // ---- Matrix: EmptyStream (GAP-2: existing-empty-stream cell deferred to Postgres 7.2) ----
@@ -197,8 +197,8 @@ public abstract class EventStoreContractTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.EmptyStream, TestEvents.Distinct(1), Ct);
 
-        Assert.Equal(0, result.NextExpectedVersion);
-        Assert.False(result.Deduplicated);
+        result.NextExpectedVersion.Should().Be(0);
+        result.Deduplicated.Should().BeFalse();
     }
 
     [Fact]
@@ -207,11 +207,11 @@ public abstract class EventStoreContractTests
         var store = await CreateStoreAsync();
         await store.AppendAsync("order-1", ExpectedVersion.NoStream, TestEvents.Distinct(2), Ct); // non-empty, last version 1
 
-        var ex = await Assert.ThrowsAsync<ConcurrencyException>(
-            () => store.AppendAsync("order-1", ExpectedVersion.EmptyStream, TestEvents.Distinct(1), Ct).AsTask());
+        var ex = (await Awaiting(
+            () => store.AppendAsync("order-1", ExpectedVersion.EmptyStream, TestEvents.Distinct(1), Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>()).Which;
 
-        Assert.Equal(ExpectedVersion.EmptyStream, ex.ExpectedVersion);
-        Assert.Equal(1, ex.ActualVersion);
+        ex.ExpectedVersion.Should().Be(ExpectedVersion.EmptyStream);
+        ex.ActualVersion.Should().Be(1);
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public abstract class EventStoreContractTests
 
         var replay = await store.AppendAsync("order-1", ExpectedVersion.EmptyStream, [e], Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
     }
 
     // ---- Matrix: StreamExists ----
@@ -233,11 +233,11 @@ public abstract class EventStoreContractTests
     {
         var store = await CreateStoreAsync();
 
-        var ex = await Assert.ThrowsAsync<ConcurrencyException>(
-            () => store.AppendAsync("order-1", ExpectedVersion.StreamExists, TestEvents.Distinct(1), Ct).AsTask());
+        var ex = (await Awaiting(
+            () => store.AppendAsync("order-1", ExpectedVersion.StreamExists, TestEvents.Distinct(1), Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>()).Which;
 
-        Assert.Equal(ExpectedVersion.StreamExists, ex.ExpectedVersion);
-        Assert.Equal(-1, ex.ActualVersion);
+        ex.ExpectedVersion.Should().Be(ExpectedVersion.StreamExists);
+        ex.ActualVersion.Should().Be(-1);
     }
 
     [Fact]
@@ -248,8 +248,8 @@ public abstract class EventStoreContractTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.StreamExists, TestEvents.Distinct(1), Ct);
 
-        Assert.Equal(1, result.NextExpectedVersion);
-        Assert.False(result.Deduplicated);
+        result.NextExpectedVersion.Should().Be(1);
+        result.Deduplicated.Should().BeFalse();
     }
 
     [Fact]
@@ -261,7 +261,7 @@ public abstract class EventStoreContractTests
 
         var replay = await store.AppendAsync("order-1", ExpectedVersion.StreamExists, [e], Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
     }
 
     // ---- Canonical TESTING-SPEC §5.1 example ----
@@ -275,7 +275,7 @@ public abstract class EventStoreContractTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.Any, [e], Ct);
 
-        Assert.True(result.Deduplicated);                                   // idempotent success — ADR-003
+        result.Deduplicated.Should().BeTrue();                              // idempotent success — ADR-003
     }
 
     // ---- Global-read guard (ADR-015) ----
@@ -290,8 +290,8 @@ public abstract class EventStoreContractTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, ct: Ct));
 
         long[] expectedPositions = [1, 2, 3, 4, 5];
-        Assert.Equal(5, all.Count);
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Count.Should().Be(5);
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -304,7 +304,7 @@ public abstract class EventStoreContractTests
         var all = await ToListAsync(store.ReadAllAsync(new GlobalPosition(2), ct: Ct));
 
         long[] expectedPositions = [3, 4, 5];
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -316,7 +316,7 @@ public abstract class EventStoreContractTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, upTo: new GlobalPosition(2), ct: Ct));
 
         long[] expectedPositions = [1, 2];
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -328,8 +328,8 @@ public abstract class EventStoreContractTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, maxCount: 2, ct: Ct));
 
         long[] expectedPositions = [1, 2];
-        Assert.Equal(2, all.Count);
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Count.Should().Be(2);
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -341,7 +341,7 @@ public abstract class EventStoreContractTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, direction: Direction.Backwards, ct: Ct));
 
         long[] expectedPositions = [3, 2, 1];
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -355,8 +355,8 @@ public abstract class EventStoreContractTests
             store.ReadAllAsync(GlobalPosition.Start, maxCount: 2, direction: Direction.Backwards, ct: Ct));
 
         long[] expectedPositions = [5, 4];
-        Assert.Equal(2, all.Count);
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Count.Should().Be(2);
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -369,7 +369,7 @@ public abstract class EventStoreContractTests
         var appended = await store.AppendAsync("order-1", ExpectedVersion.NoStream, TestEvents.Distinct(1), Ct);
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, ct: Ct));
 
-        Assert.Single(all);
-        Assert.Equal(appended.LastGlobalPosition.Value, all[0].GlobalPosition.Value);
+        all.Should().ContainSingle();
+        all[0].GlobalPosition.Value.Should().Be(appended.LastGlobalPosition.Value);
     }
 }

@@ -29,15 +29,15 @@ public sealed class EventMetadataTests
             Extensions = extensions,
         };
 
-        Assert.Equal(messageId, metadata.MessageId);
-        Assert.Equal(correlationId, metadata.CorrelationId);
-        Assert.Equal(causationId, metadata.CausationId);
-        Assert.Equal(timestamp, metadata.Timestamp);
-        Assert.Equal(user, metadata.User);
-        Assert.Equal("tenant-1", metadata.TenantId);
-        Assert.Equal("00-trace-01", metadata.TraceParent);
-        Assert.Equal("state-01", metadata.TraceState);
-        Assert.Same(extensions, metadata.Extensions);
+        metadata.MessageId.Should().Be(messageId);
+        metadata.CorrelationId.Should().Be(correlationId);
+        metadata.CausationId.Should().Be(causationId);
+        metadata.Timestamp.Should().Be(timestamp);
+        metadata.User.Should().Be(user);
+        metadata.TenantId.Should().Be("tenant-1");
+        metadata.TraceParent.Should().Be("00-trace-01");
+        metadata.TraceState.Should().Be("state-01");
+        metadata.Extensions.Should().BeSameAs(extensions);
     }
 
     [Fact]
@@ -53,9 +53,9 @@ public sealed class EventMetadataTests
 
         var updated = original with { TenantId = "tenant-2" };
 
-        Assert.Equal("tenant-2", updated.TenantId);
-        Assert.Equal(original.MessageId, updated.MessageId);
-        Assert.Equal(original.CorrelationId, updated.CorrelationId);
-        Assert.Equal(original.CausationId, updated.CausationId);
+        updated.TenantId.Should().Be("tenant-2");
+        updated.MessageId.Should().Be(original.MessageId);
+        updated.CorrelationId.Should().Be(original.CorrelationId);
+        updated.CausationId.Should().Be(original.CausationId);
     }
 }

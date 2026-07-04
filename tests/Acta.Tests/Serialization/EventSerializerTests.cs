@@ -34,13 +34,13 @@ public sealed class EventSerializerTests
     [Fact]
     public void Constructor_NullRegistry_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => new EventSerializer(null!, Options));
+        Invoking(() => new EventSerializer(null!, Options)).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
     public void Constructor_NullOptions_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => new EventSerializer(CreateRegistry(), null!));
+        Invoking(() => new EventSerializer(CreateRegistry(), null!)).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -53,10 +53,10 @@ public sealed class EventSerializerTests
 
         var eventData = serializer.ToEventData(new OrderShipped("o-1", 2), metadata, eventId);
 
-        Assert.Equal("OrderShipped", eventData.EventType);
-        Assert.Equal(3, eventData.SchemaVersion);
-        Assert.Equal(eventId, eventData.EventId);
-        Assert.Same(metadata, eventData.Metadata);
+        eventData.EventType.Should().Be("OrderShipped");
+        eventData.SchemaVersion.Should().Be(3);
+        eventData.EventId.Should().Be(eventId);
+        eventData.Metadata.Should().BeSameAs(metadata);
     }
 
     [Fact]
@@ -68,13 +68,13 @@ public sealed class EventSerializerTests
         var eventData = serializer.ToEventData(new OrderPlaced("o-1", "c-1"), metadata, Guid.NewGuid());
 
         var roundTripped = JsonSerializer.Deserialize<OrderPlaced>(eventData.Payload.Span, Options);
-        Assert.NotNull(roundTripped);
-        Assert.Equal("o-1", roundTripped.OrderId);
-        Assert.Equal("c-1", roundTripped.CustomerId);
+        roundTripped.Should().NotBeNull();
+        roundTripped!.OrderId.Should().Be("o-1");
+        roundTripped.CustomerId.Should().Be("c-1");
 
         var payloadText = Encoding.UTF8.GetString(eventData.Payload.Span);
-        Assert.DoesNotContain("CorrelationId", payloadText);
-        Assert.DoesNotContain("MessageId", payloadText);
+        payloadText.Should().NotContain("CorrelationId");
+        payloadText.Should().NotContain("MessageId");
     }
 
     [Fact]
@@ -82,8 +82,8 @@ public sealed class EventSerializerTests
     {
         var serializer = new EventSerializer(CreateRegistry(), Options);
 
-        Assert.Throws<UnknownEventTypeException>(
-            () => serializer.ToEventData(new OrderShipped("o-1", 1), CreateMetadata(), Guid.NewGuid()));
+        Invoking(() => serializer.ToEventData(new OrderShipped("o-1", 1), CreateMetadata(), Guid.NewGuid()))
+            .Should().Throw<UnknownEventTypeException>();
     }
 
     [Fact]
@@ -91,8 +91,8 @@ public sealed class EventSerializerTests
     {
         var serializer = new EventSerializer(CreateRegistry(), Options);
 
-        Assert.Throws<ArgumentNullException>(
-            () => serializer.ToEventData(null!, CreateMetadata(), Guid.NewGuid()));
+        Invoking(() => serializer.ToEventData(null!, CreateMetadata(), Guid.NewGuid()))
+            .Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -100,8 +100,8 @@ public sealed class EventSerializerTests
     {
         var serializer = new EventSerializer(CreateRegistry(), Options);
 
-        Assert.Throws<ArgumentNullException>(
-            () => serializer.ToEventData(new OrderPlaced("o-1", "c-1"), null!, Guid.NewGuid()));
+        Invoking(() => serializer.ToEventData(new OrderPlaced("o-1", "c-1"), null!, Guid.NewGuid()))
+            .Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -123,10 +123,10 @@ public sealed class EventSerializerTests
 
         var sourced = serializer.ToSourcedEvent(stored);
 
-        var order = Assert.IsType<OrderPlaced>(sourced.Event);
-        Assert.Equal("o-9", order.OrderId);
-        Assert.Equal("c-9", order.CustomerId);
-        Assert.Same(stored, sourced.Raw);
+        var order = sourced.Event.Should().BeOfType<OrderPlaced>().Subject;
+        order.OrderId.Should().Be("o-9");
+        order.CustomerId.Should().Be("c-9");
+        sourced.Raw.Should().BeSameAs(stored);
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public sealed class EventSerializerTests
             CreateMetadata(),
             DateTimeOffset.UtcNow);
 
-        Assert.Throws<UnknownEventTypeException>(() => serializer.ToSourcedEvent(stored));
+        Invoking(() => serializer.ToSourcedEvent(stored)).Should().Throw<UnknownEventTypeException>();
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class EventSerializerTests
     {
         var serializer = new EventSerializer(CreateRegistry(), Options);
 
-        Assert.Throws<ArgumentNullException>(() => serializer.ToSourcedEvent(null!));
+        Invoking(() => serializer.ToSourcedEvent(null!)).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -164,13 +164,13 @@ public sealed class EventSerializerTests
         var bytes = serializer.SerializeMetadata(metadata);
         var roundTripped = serializer.DeserializeMetadata(bytes);
 
-        Assert.Equal(metadata.MessageId, roundTripped.MessageId);
-        Assert.Equal(metadata.CorrelationId, roundTripped.CorrelationId);
-        Assert.Equal(metadata.CausationId, roundTripped.CausationId);
-        Assert.Equal(metadata.Timestamp, roundTripped.Timestamp);
-        Assert.Equal(metadata.TenantId, roundTripped.TenantId);
-        Assert.Equal(metadata.TraceParent, roundTripped.TraceParent);
-        Assert.Equal(metadata.TraceState, roundTripped.TraceState);
+        roundTripped.MessageId.Should().Be(metadata.MessageId);
+        roundTripped.CorrelationId.Should().Be(metadata.CorrelationId);
+        roundTripped.CausationId.Should().Be(metadata.CausationId);
+        roundTripped.Timestamp.Should().Be(metadata.Timestamp);
+        roundTripped.TenantId.Should().Be(metadata.TenantId);
+        roundTripped.TraceParent.Should().Be(metadata.TraceParent);
+        roundTripped.TraceState.Should().Be(metadata.TraceState);
     }
 
     [Fact]
@@ -182,11 +182,11 @@ public sealed class EventSerializerTests
         var bytes = serializer.SerializeMetadata(metadata);
         var roundTripped = serializer.DeserializeMetadata(bytes);
 
-        Assert.Equal("acct-123", roundTripped.User!.Value.Value);
+        roundTripped.User!.Value.Value.Should().Be("acct-123");
 
         var json = Encoding.UTF8.GetString(bytes);
-        Assert.Contains("\"acct-123\"", json);
-        Assert.DoesNotContain("\"Value\":", json);
+        json.Should().Contain("\"acct-123\"");
+        json.Should().NotContain("\"Value\":");
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class EventSerializerTests
         var bytes = serializer.SerializeMetadata(metadata);
         var roundTripped = serializer.DeserializeMetadata(bytes);
 
-        Assert.Null(roundTripped.User);
+        roundTripped.User.Should().BeNull();
     }
 
     [Fact]
@@ -210,8 +210,8 @@ public sealed class EventSerializerTests
         var bytes = serializer.SerializeMetadata(metadata);
         var roundTripped = serializer.DeserializeMetadata(bytes);
 
-        Assert.NotNull(roundTripped.Extensions);
-        Assert.Equal("v", roundTripped.Extensions!["k"]);
+        roundTripped.Extensions.Should().NotBeNull();
+        roundTripped.Extensions!["k"].Should().Be("v");
     }
 
     [Fact]
@@ -220,13 +220,13 @@ public sealed class EventSerializerTests
         var serializer = new EventSerializer(CreateRegistry(), Options);
         var baseline = Encoding.UTF8.GetString(serializer.SerializeMetadata(CreateMetadata(user: null)));
         var mutated = baseline.Replace("\"User\":null", "\"User\":\"bad@x\"");
-        Assert.NotEqual(baseline, mutated);
+        mutated.Should().NotBe(baseline);
         var bytes = Encoding.UTF8.GetBytes(mutated);
 
         // Empirically observed: System.Text.Json does NOT wrap an arbitrary exception thrown by a
         // custom converter's Read() in JsonException — the UserRef constructor's
         // ArgumentException propagates unchanged.
-        Assert.Throws<ArgumentException>(() => serializer.DeserializeMetadata(bytes));
+        Invoking(() => serializer.DeserializeMetadata(bytes)).Should().Throw<ArgumentException>();
     }
 
     [Fact]
@@ -235,10 +235,10 @@ public sealed class EventSerializerTests
         var serializer = new EventSerializer(CreateRegistry(), Options);
         var baseline = Encoding.UTF8.GetString(serializer.SerializeMetadata(CreateMetadata(user: null)));
         var mutated = baseline.Replace("\"User\":null", "\"User\":123");
-        Assert.NotEqual(baseline, mutated);
+        mutated.Should().NotBe(baseline);
         var bytes = Encoding.UTF8.GetBytes(mutated);
 
-        Assert.Throws<JsonException>(() => serializer.DeserializeMetadata(bytes));
+        Invoking(() => serializer.DeserializeMetadata(bytes)).Should().Throw<JsonException>();
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public sealed class EventSerializerTests
     {
         var serializer = new EventSerializer(CreateRegistry(), Options);
 
-        Assert.Throws<JsonException>(() => serializer.DeserializeMetadata("null"u8.ToArray()));
+        Invoking(() => serializer.DeserializeMetadata("null"u8.ToArray())).Should().Throw<JsonException>();
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public sealed class EventSerializerTests
 
         var sourced = serializer.ToSourcedEvent(stored);
 
-        Assert.Equal(original, Assert.IsType<OrderPlaced>(sourced.Event));
+        sourced.Event.Should().BeOfType<OrderPlaced>().Subject.Should().Be(original);
     }
 
     [Fact]
@@ -278,7 +278,7 @@ public sealed class EventSerializerTests
     {
         var serializer = new EventSerializer(CreateRegistry(), Options);
 
-        Assert.Throws<ArgumentNullException>(() => serializer.SerializeMetadata(null!));
+        Invoking(() => serializer.SerializeMetadata(null!)).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -286,8 +286,8 @@ public sealed class EventSerializerTests
     {
         var serializer = new EventSerializer(CreateRegistry(), Options);
 
-        var ex = Assert.Throws<JsonException>(() => serializer.DeserializeMetadata("null"u8.ToArray()));
-        Assert.Contains("deserialized to null", ex.Message);
+        Invoking(() => serializer.DeserializeMetadata("null"u8.ToArray()))
+            .Should().Throw<JsonException>().WithMessage("*deserialized to null*");
     }
 
     [Fact]
@@ -298,7 +298,7 @@ public sealed class EventSerializerTests
         var mutated = baseline.Replace("\"User\":null", "\"User\":123");
         var bytes = Encoding.UTF8.GetBytes(mutated);
 
-        var ex = Assert.Throws<JsonException>(() => serializer.DeserializeMetadata(bytes));
-        Assert.Contains("UserRef", ex.Message);
+        Invoking(() => serializer.DeserializeMetadata(bytes))
+            .Should().Throw<JsonException>().WithMessage("*UserRef*");
     }
 }

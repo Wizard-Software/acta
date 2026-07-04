@@ -20,8 +20,8 @@ public sealed class AggregateRootTests
 
         var exception = Record.Exception(() => aggregate.LoadFromHistory(history));
 
-        Assert.Null(exception);
-        Assert.Equal(1, aggregate.Ignored);
+        exception.Should().BeNull();
+        aggregate.Ignored.Should().Be(1);
     }
 
     [Fact]
@@ -31,9 +31,9 @@ public sealed class AggregateRootTests
 
         aggregate.Increment();
 
-        Assert.Equal(0, aggregate.Version);
-        Assert.Single(aggregate.UncommittedEvents);
-        Assert.IsType<Incremented>(aggregate.UncommittedEvents[0]);
+        aggregate.Version.Should().Be(0);
+        aggregate.UncommittedEvents.Should().ContainSingle();
+        aggregate.UncommittedEvents[0].Should().BeOfType<Incremented>();
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public sealed class AggregateRootTests
 
         // State (Applied) is updated as part of the very same call that queues the event —
         // there is no window where the event is queued but state has not yet folded it in.
-        Assert.Equal(1, aggregate.Applied);
-        Assert.Single(aggregate.UncommittedEvents);
+        aggregate.Applied.Should().Be(1);
+        aggregate.UncommittedEvents.Should().ContainSingle();
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public sealed class AggregateRootTests
     {
         var aggregate = new CounterAggregate();
 
-        Assert.Throws<ArgumentNullException>(aggregate.RaiseNull);
+        Invoking(aggregate.RaiseNull).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public sealed class AggregateRootTests
 
         aggregate.LoadFromHistory(history);
 
-        Assert.Empty(aggregate.UncommittedEvents);
+        aggregate.UncommittedEvents.Should().BeEmpty();
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed class AggregateRootTests
     {
         var aggregate = new CounterAggregate();
 
-        Assert.Throws<ArgumentNullException>(() => aggregate.LoadFromHistory(null!));
+        Invoking(() => aggregate.LoadFromHistory(null!)).Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -84,9 +84,9 @@ public sealed class AggregateRootTests
 
         aggregate.LoadFromHistory(history);
 
-        Assert.Equal(3, aggregate.Version);
-        Assert.Equal(1, aggregate.Applied);
-        Assert.Equal(1, aggregate.Ignored);
+        aggregate.Version.Should().Be(3);
+        aggregate.Applied.Should().Be(1);
+        aggregate.Ignored.Should().Be(1);
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class AggregateRootTests
 
         aggregate.ClearUncommittedEvents();
 
-        Assert.Empty(aggregate.UncommittedEvents);
-        Assert.Equal(1, aggregate.Version);
+        aggregate.UncommittedEvents.Should().BeEmpty();
+        aggregate.Version.Should().Be(1);
     }
 }

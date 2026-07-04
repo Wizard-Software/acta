@@ -50,7 +50,7 @@ public sealed class ActaOptionsValidationTests
 
         var validator = provider.GetRequiredService<IStartupValidator>();
 
-        Assert.NotNull(validator);
+        validator.Should().NotBeNull();
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class ActaOptionsValidationTests
 
         var exception = Record.Exception(validator.Validate);
 
-        Assert.Null(exception);
+        exception.Should().BeNull();
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class ActaOptionsValidationTests
         using var provider = BuildProvider(new ListLoggerProvider(), o => o.SerializerOptions = null!);
         var validator = provider.GetRequiredService<IStartupValidator>();
 
-        Assert.Throws<OptionsValidationException>(validator.Validate);
+        Invoking(validator.Validate).Should().Throw<OptionsValidationException>();
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class ActaOptionsValidationTests
         using var provider = BuildProvider(new ListLoggerProvider(), o => o.SerializerOptions = null!);
         var options = provider.GetRequiredService<IOptions<ActaOptions>>();
 
-        Assert.Throws<OptionsValidationException>(() => options.Value);
+        Invoking(() => options.Value).Should().Throw<OptionsValidationException>();
     }
 
     [Fact]
@@ -91,8 +91,7 @@ public sealed class ActaOptionsValidationTests
 
         validator.Validate();
 
-        Assert.Contains(
-            logProvider.Entries,
+        logProvider.Entries.Should().Contain(
             e => e.Level == LogLevel.Warning && e.Message.Contains("SINGLE-PROCESS", StringComparison.Ordinal));
     }
 
@@ -105,8 +104,7 @@ public sealed class ActaOptionsValidationTests
 
         validator.Validate();
 
-        Assert.Contains(
-            logProvider.Entries,
+        logProvider.Entries.Should().Contain(
             e => e.Level == LogLevel.Warning && e.Message.Contains("no event types are registered", StringComparison.Ordinal));
     }
 }

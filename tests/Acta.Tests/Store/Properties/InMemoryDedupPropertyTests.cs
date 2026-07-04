@@ -45,10 +45,10 @@ public sealed class InMemoryDedupPropertyTests
             var first = await store.AppendAsync(Stream, ExpectedVersion.Any, batch, ct);
             var replay = await store.AppendAsync(Stream, ExpectedVersion.Any, batch, ct);
 
-            Assert.False(first.Deduplicated);
-            Assert.True(replay.Deduplicated);
-            Assert.Equal(first.NextExpectedVersion, replay.NextExpectedVersion);
-            Assert.Equal(batch.Length, await StreamCountAsync(store, ct));
+            first.Deduplicated.Should().BeFalse();
+            replay.Deduplicated.Should().BeTrue();
+            replay.NextExpectedVersion.Should().Be(first.NextExpectedVersion);
+            (await StreamCountAsync(store, ct)).Should().Be(batch.Length);
         });
     }
 
@@ -75,8 +75,8 @@ public sealed class InMemoryDedupPropertyTests
             // stream; the always-mismatching exact version 999).
             var replay = await store.AppendAsync(Stream, mode, batch, ct);
 
-            Assert.True(replay.Deduplicated);
-            Assert.Equal(batch.Length, await StreamCountAsync(store, ct));
+            replay.Deduplicated.Should().BeTrue();
+            (await StreamCountAsync(store, ct)).Should().Be(batch.Length);
         });
     }
 
@@ -96,8 +96,8 @@ public sealed class InMemoryDedupPropertyTests
 
             var replay = await store.AppendAsync(Stream, ExpectedVersion.Any, batch, ct);
 
-            Assert.True(replay.Deduplicated);
-            Assert.Equal(countAfterFirst, await StreamCountAsync(store, ct));
+            replay.Deduplicated.Should().BeTrue();
+            (await StreamCountAsync(store, ct)).Should().Be(countAfterFirst);
         });
     }
 
@@ -116,8 +116,8 @@ public sealed class InMemoryDedupPropertyTests
 
             var result = await store.AppendAsync(Stream, ExpectedVersion.NoStream, batch, ct);
 
-            Assert.False(result.Deduplicated);
-            Assert.Equal(batch.Length, await StreamCountAsync(store, ct)); // both copies stored
+            result.Deduplicated.Should().BeFalse();
+            (await StreamCountAsync(store, ct)).Should().Be(batch.Length); // both copies stored
         });
     }
 
@@ -139,14 +139,14 @@ public sealed class InMemoryDedupPropertyTests
 
             var retry = await store.AppendAsync(Stream, ExpectedVersion.Any, partialRetry, ct);
 
-            Assert.True(retry.Deduplicated);
-            Assert.Equal(first.Length, await StreamCountAsync(store, ct)); // no fresh event appended
+            retry.Deduplicated.Should().BeTrue();
+            (await StreamCountAsync(store, ct)).Should().Be(first.Length); // no fresh event appended
 
             // No fresh key leaked into the stream: every stored EventId belongs to the original batch.
             var firstIds = first.Select(e => e.EventId).ToHashSet();
             await foreach (var stored in store.ReadStreamAsync(Stream, ct: ct))
             {
-                Assert.Contains(stored.EventId, firstIds);
+                firstIds.Should().Contain(stored.EventId);
             }
         });
     }

@@ -197,12 +197,19 @@
         "dependencies": {
           "Acta": "[1.0.0, )",
           "Acta.Testing": "[1.0.0, )",
+          "AwesomeAssertions": "[9.4.0, )",
           "CsCheck": "[4.7.0, )",
           "Microsoft.Extensions.DependencyInjection": "[10.0.9, )",
           "Microsoft.NET.Test.Sdk": "[18.7.0, )",
           "xunit.runner.visualstudio": "[3.1.5, )",
           "xunit.v3": "[3.2.2, )"
         }
+      },
+      "AwesomeAssertions": {
+        "type": "CentralTransitive",
+        "requested": "[9.4.0, )",
+        "resolved": "9.4.0",
+        "contentHash": "dJxkWiQ8D+xT6Gr2sSL83+Mar+Vpy2JTcUPxFcckpPJ8VYBfSgnk+zqpS6t7kcGnjz8NLyF14qfuoL4bKzzoew=="
       },
       "CsCheck": {
         "type": "CentralTransitive",

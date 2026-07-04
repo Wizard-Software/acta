@@ -41,16 +41,16 @@ public sealed class InMemoryEventStoreTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.NoStream, batch, Ct);
 
-        Assert.Equal(2, result.NextExpectedVersion);
-        Assert.Equal(3, result.LastGlobalPosition.Value);
-        Assert.False(result.Deduplicated);
+        result.NextExpectedVersion.Should().Be(2);
+        result.LastGlobalPosition.Value.Should().Be(3);
+        result.Deduplicated.Should().BeFalse();
 
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", ct: Ct));
         long[] expectedVersions = [0, 1, 2];
         long[] expectedPositions = [1, 2, 3];
-        Assert.Equal(3, stored.Count);
-        Assert.Equal(expectedVersions, stored.Select(e => e.Version));
-        Assert.Equal(expectedPositions, stored.Select(e => e.GlobalPosition.Value));
+        stored.Count.Should().Be(3);
+        stored.Select(e => e.Version).Should().Equal(expectedVersions);
+        stored.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -61,8 +61,8 @@ public sealed class InMemoryEventStoreTests
 
         var result = await store.AppendAsync("order-1", 1, CreateBatch(1), Ct);
 
-        Assert.Equal(2, result.NextExpectedVersion);
-        Assert.False(result.Deduplicated);
+        result.NextExpectedVersion.Should().Be(2);
+        result.Deduplicated.Should().BeFalse();
     }
 
     [Fact]
@@ -71,12 +71,12 @@ public sealed class InMemoryEventStoreTests
         var store = new InMemoryEventStore();
         await store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(2), Ct);
 
-        var ex = await Assert.ThrowsAsync<ConcurrencyException>(
-            () => store.AppendAsync("order-1", 5, CreateBatch(1), Ct).AsTask());
+        var ex = (await Awaiting(
+            () => store.AppendAsync("order-1", 5, CreateBatch(1), Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>()).Which;
 
-        Assert.Equal("order-1", ex.StreamId);
-        Assert.Equal(5, ex.ExpectedVersion);
-        Assert.Equal(1, ex.ActualVersion);
+        ex.StreamId.Should().Be("order-1");
+        ex.ExpectedVersion.Should().Be(5);
+        ex.ActualVersion.Should().Be(1);
     }
 
     [Fact]
@@ -85,8 +85,8 @@ public sealed class InMemoryEventStoreTests
         var store = new InMemoryEventStore();
         await store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct);
 
-        await Assert.ThrowsAsync<ConcurrencyException>(
-            () => store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct).AsTask());
+        await Awaiting(
+            () => store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>();
     }
 
     [Fact]
@@ -94,8 +94,8 @@ public sealed class InMemoryEventStoreTests
     {
         var store = new InMemoryEventStore();
 
-        await Assert.ThrowsAsync<ConcurrencyException>(
-            () => store.AppendAsync("order-1", ExpectedVersion.StreamExists, CreateBatch(1), Ct).AsTask());
+        await Awaiting(
+            () => store.AppendAsync("order-1", ExpectedVersion.StreamExists, CreateBatch(1), Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>();
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class InMemoryEventStoreTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.StreamExists, CreateBatch(1), Ct);
 
-        Assert.Equal(1, result.NextExpectedVersion);
+        result.NextExpectedVersion.Should().Be(1);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public sealed class InMemoryEventStoreTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.Any, CreateBatch(1), Ct);
 
-        Assert.Equal(2, result.NextExpectedVersion);
+        result.NextExpectedVersion.Should().Be(2);
     }
 
     [Fact]
@@ -129,12 +129,12 @@ public sealed class InMemoryEventStoreTests
 
         var replay = await store.AppendAsync("order-1", ExpectedVersion.NoStream, batch, Ct);
 
-        Assert.True(replay.Deduplicated);
-        Assert.Equal(first.NextExpectedVersion, replay.NextExpectedVersion);
-        Assert.Equal(first.LastGlobalPosition, replay.LastGlobalPosition);
+        replay.Deduplicated.Should().BeTrue();
+        replay.NextExpectedVersion.Should().Be(first.NextExpectedVersion);
+        replay.LastGlobalPosition.Should().Be(first.LastGlobalPosition);
 
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", ct: Ct));
-        Assert.Equal(2, stored.Count);
+        stored.Count.Should().Be(2);
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public sealed class InMemoryEventStoreTests
 
         var replay = await store.AppendAsync("order-1", ExpectedVersion.Any, batch, Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public sealed class InMemoryEventStoreTests
         // full-batch dedup must be recognized BEFORE the guard, so this must not throw (ADR-003).
         var replay = await store.AppendAsync("order-1", ExpectedVersion.NoStream, batch, Ct);
 
-        Assert.True(replay.Deduplicated);
+        replay.Deduplicated.Should().BeTrue();
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public sealed class InMemoryEventStoreTests
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", ct: Ct));
 
         long[] expectedVersions = [0, 1, 2];
-        Assert.Equal(expectedVersions, stored.Select(e => e.Version));
+        stored.Select(e => e.Version).Should().Equal(expectedVersions);
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public sealed class InMemoryEventStoreTests
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", direction: Direction.Backwards, ct: Ct));
 
         long[] expectedVersions = [2, 1, 0];
-        Assert.Equal(expectedVersions, stored.Select(e => e.Version));
+        stored.Select(e => e.Version).Should().Equal(expectedVersions);
     }
 
     [Fact]
@@ -199,7 +199,7 @@ public sealed class InMemoryEventStoreTests
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", fromVersion: 1, toVersion: 3, ct: Ct));
 
         long[] expectedVersions = [1, 2, 3];
-        Assert.Equal(expectedVersions, stored.Select(e => e.Version));
+        stored.Select(e => e.Version).Should().Equal(expectedVersions);
     }
 
     [Fact]
@@ -209,7 +209,7 @@ public sealed class InMemoryEventStoreTests
 
         var stored = await ToListAsync(store.ReadStreamAsync("ghost", ct: Ct));
 
-        Assert.Empty(stored);
+        stored.Should().BeEmpty();
     }
 
     [Fact]
@@ -222,8 +222,8 @@ public sealed class InMemoryEventStoreTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, ct: Ct));
 
         long[] expectedPositions = [1, 2, 3, 4, 5];
-        Assert.Equal(5, all.Count);
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Count.Should().Be(5);
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public sealed class InMemoryEventStoreTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, upTo: new GlobalPosition(2), ct: Ct));
 
         long[] expectedPositions = [1, 2];
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -247,8 +247,8 @@ public sealed class InMemoryEventStoreTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, maxCount: 2, ct: Ct));
 
         long[] expectedPositions = [1, 2];
-        Assert.Equal(2, all.Count);
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Count.Should().Be(2);
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public sealed class InMemoryEventStoreTests
         var all = await ToListAsync(store.ReadAllAsync(GlobalPosition.Start, direction: Direction.Backwards, ct: Ct));
 
         long[] expectedPositions = [3, 2, 1];
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -273,7 +273,7 @@ public sealed class InMemoryEventStoreTests
         var all = await ToListAsync(store.ReadAllAsync(new GlobalPosition(2), ct: Ct));
 
         long[] expectedPositions = [3, 4, 5];
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -287,8 +287,8 @@ public sealed class InMemoryEventStoreTests
             store.ReadAllAsync(GlobalPosition.Start, maxCount: 2, direction: Direction.Backwards, ct: Ct));
 
         long[] expectedPositions = [5, 4];
-        Assert.Equal(2, all.Count);
-        Assert.Equal(expectedPositions, all.Select(e => e.GlobalPosition.Value));
+        all.Count.Should().Be(2);
+        all.Select(e => e.GlobalPosition.Value).Should().Equal(expectedPositions);
     }
 
     [Fact]
@@ -304,8 +304,8 @@ public sealed class InMemoryEventStoreTests
         // one-event stream must use Any/StreamExists/exact->=1, not the literal 0.
         var third = await store.AppendAsync("order-1", ExpectedVersion.Any, CreateBatch(1), Ct);
 
-        Assert.True(first.LastGlobalPosition < second.LastGlobalPosition);
-        Assert.True(second.LastGlobalPosition < third.LastGlobalPosition);
+        (first.LastGlobalPosition < second.LastGlobalPosition).Should().BeTrue();
+        (second.LastGlobalPosition < third.LastGlobalPosition).Should().BeTrue();
     }
 
     [Fact]
@@ -322,13 +322,13 @@ public sealed class InMemoryEventStoreTests
 
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", ct: ct));
 
-        Assert.Equal(parallelAppends, stored.Count);
+        stored.Count.Should().Be(parallelAppends);
         long[] expectedVersions = [.. Enumerable.Range(0, parallelAppends).Select(i => (long)i)];
-        Assert.Equal(expectedVersions, stored.Select(e => e.Version));
+        stored.Select(e => e.Version).Should().Equal(expectedVersions);
 
         var globalPositions = stored.Select(e => e.GlobalPosition.Value).ToArray();
-        Assert.Equal(globalPositions.Distinct().Count(), globalPositions.Length);
-        Assert.Equal(globalPositions.OrderBy(v => v), globalPositions);
+        globalPositions.Length.Should().Be(globalPositions.Distinct().Count());
+        globalPositions.Should().Equal(globalPositions.OrderBy(v => v));
     }
 
     [Fact]
@@ -338,8 +338,8 @@ public sealed class InMemoryEventStoreTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), cts.Token).AsTask());
+        await Awaiting(
+            () => store.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), cts.Token).AsTask()).Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
@@ -350,12 +350,12 @@ public sealed class InMemoryEventStoreTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        await Awaiting(async () =>
         {
             await foreach (var _ in store.ReadStreamAsync("order-1", ct: cts.Token))
             {
             }
-        });
+        }).Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
@@ -366,12 +366,12 @@ public sealed class InMemoryEventStoreTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        await Awaiting(async () =>
         {
             await foreach (var _ in store.ReadAllAsync(GlobalPosition.Start, ct: cts.Token))
             {
             }
-        });
+        }).Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
@@ -382,11 +382,11 @@ public sealed class InMemoryEventStoreTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.Any, [], Ct);
 
-        Assert.False(result.Deduplicated);
-        Assert.Equal(1, result.NextExpectedVersion);
+        result.Deduplicated.Should().BeFalse();
+        result.NextExpectedVersion.Should().Be(1);
 
         var stored = await ToListAsync(store.ReadStreamAsync("order-1", ct: Ct));
-        Assert.Equal(2, stored.Count);
+        stored.Count.Should().Be(2);
     }
 
     [Fact]
@@ -396,7 +396,7 @@ public sealed class InMemoryEventStoreTests
 
         var result = await store.AppendAsync("order-1", ExpectedVersion.EmptyStream, CreateBatch(1), Ct);
 
-        Assert.Equal(0, result.NextExpectedVersion);
+        result.NextExpectedVersion.Should().Be(0);
     }
 
     [Fact]
@@ -404,8 +404,8 @@ public sealed class InMemoryEventStoreTests
     {
         var store = new InMemoryEventStore();
 
-        await Assert.ThrowsAsync<ArgumentNullException>(
-            () => store.AppendAsync(null!, ExpectedVersion.Any, CreateBatch(1), Ct).AsTask());
+        await Awaiting(
+            () => store.AppendAsync(null!, ExpectedVersion.Any, CreateBatch(1), Ct).AsTask()).Should().ThrowAsync<ArgumentNullException>();
     }
 
     [Fact]
@@ -413,8 +413,8 @@ public sealed class InMemoryEventStoreTests
     {
         var store = new InMemoryEventStore();
 
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => store.AppendAsync(string.Empty, ExpectedVersion.Any, CreateBatch(1), Ct).AsTask());
+        await Awaiting(
+            () => store.AppendAsync(string.Empty, ExpectedVersion.Any, CreateBatch(1), Ct).AsTask()).Should().ThrowAsync<ArgumentException>();
     }
 
     [Fact]
@@ -422,7 +422,7 @@ public sealed class InMemoryEventStoreTests
     {
         var store = new InMemoryEventStore();
 
-        await Assert.ThrowsAsync<ArgumentNullException>(
-            () => store.AppendAsync("order-1", ExpectedVersion.Any, null!, Ct).AsTask());
+        await Awaiting(
+            () => store.AppendAsync("order-1", ExpectedVersion.Any, null!, Ct).AsTask()).Should().ThrowAsync<ArgumentNullException>();
     }
 }
