@@ -22,4 +22,18 @@
     <PackageVersion Include="CsCheck" Version="4.7.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      Core rdzenia (task 3.3 — AddActa composition root): first-party Microsoft.Extensions.*
+      packages, pre-sanctioned by CONSTITUTION §2 ALWAYS DO ("rdzeń tylko Acta.Abstractions +
+      Microsoft.Extensions.* + System.Text.Json"). Latest stable 10.0.x verified against NuGet.org
+      at implementation time (net10.0 SDK 10.0.301).
+    -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <!-- Test project only — needed for ServiceCollection/BuildServiceProvider in DI tests. -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+  </ItemGroup>
+
 </Project>
