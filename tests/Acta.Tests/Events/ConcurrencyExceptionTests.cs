@@ -11,9 +11,9 @@ public sealed class ConcurrencyExceptionTests
     {
         var ex = new ConcurrencyException("order-1", 5, 7);
 
-        Assert.Equal("order-1", ex.StreamId);
-        Assert.Equal(5, ex.ExpectedVersion);
-        Assert.Equal(7, ex.ActualVersion);
+        ex.StreamId.Should().Be("order-1");
+        ex.ExpectedVersion.Should().Be(5);
+        ex.ActualVersion.Should().Be(7);
     }
 
     [Fact]
@@ -21,6 +21,6 @@ public sealed class ConcurrencyExceptionTests
     {
         var ex = new ConcurrencyException("order-1", 5, 7);
 
-        Assert.Equal("Concurrency conflict on 'order-1': expected 5, actual 7", ex.Message);
+        ex.Message.Should().Be("Concurrency conflict on 'order-1': expected 5, actual 7");
     }
 }

@@ -50,7 +50,7 @@ public sealed class AggregateRepositoryTests
 
         var aggregate = await repository.GetByIdAsync("counter-ghost", Ct);
 
-        Assert.Null(aggregate);
+        aggregate.Should().BeNull();
     }
 
     [Fact]
@@ -65,9 +65,9 @@ public sealed class AggregateRepositoryTests
 
         var aggregate = await repository.GetByIdAsync("counter-1", Ct);
 
-        Assert.NotNull(aggregate);
-        Assert.Equal(0, aggregate.Version);
-        Assert.Equal(1, aggregate.Applied);
+        aggregate.Should().NotBeNull();
+        aggregate.Version.Should().Be(0);
+        aggregate.Applied.Should().Be(1);
     }
 
     [Fact]
@@ -84,9 +84,9 @@ public sealed class AggregateRepositoryTests
 
         var aggregate = await repository.GetByIdAsync("counter-1", Ct);
 
-        Assert.NotNull(aggregate);
-        Assert.Equal(2, aggregate.Version);
-        Assert.Equal(1, aggregate.Applied);
+        aggregate.Should().NotBeNull();
+        aggregate.Version.Should().Be(2);
+        aggregate.Applied.Should().Be(1);
     }
 
     [Fact]
@@ -101,10 +101,10 @@ public sealed class AggregateRepositoryTests
         CounterAggregate? aggregate = null;
         var exception = await Record.ExceptionAsync(async () => aggregate = await repository.GetByIdAsync("counter-1", Ct));
 
-        Assert.Null(exception);
-        Assert.NotNull(aggregate);
-        Assert.Equal(1, aggregate.Ignored);
-        Assert.Equal(0, aggregate.Applied);
+        exception.Should().BeNull();
+        aggregate.Should().NotBeNull();
+        aggregate.Ignored.Should().Be(1);
+        aggregate.Applied.Should().Be(0);
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public sealed class AggregateRepositoryTests
         await store.AppendAsync("counter-1", ExpectedVersion.NoStream, [eventData], Ct);
         var repository = CounterEventsRegistry.CreateRepository(store);
 
-        await Assert.ThrowsAsync<UnknownEventTypeException>(() => repository.GetByIdAsync("counter-1", Ct).AsTask());
+        await Awaiting(() => repository.GetByIdAsync("counter-1", Ct).AsTask()).Should().ThrowAsync<UnknownEventTypeException>();
     }
 
     [Fact]
@@ -125,9 +125,9 @@ public sealed class AggregateRepositoryTests
 
         var session = await repository.FetchForWritingAsync("counter-new", Ct);
 
-        Assert.Equal(-1, session.ReadVersion);
-        Assert.Equal(-1, session.Aggregate.Version);
-        Assert.Empty(session.Aggregate.UncommittedEvents);
+        session.ReadVersion.Should().Be(-1);
+        session.Aggregate.Version.Should().Be(-1);
+        session.Aggregate.UncommittedEvents.Should().BeEmpty();
     }
 
     [Fact]
@@ -143,9 +143,9 @@ public sealed class AggregateRepositoryTests
 
         var session = await repository.FetchForWritingAsync("counter-1", Ct);
 
-        Assert.Equal(1, session.ReadVersion);
-        Assert.Equal(1, session.Aggregate.Version);
-        Assert.Equal(2, session.Aggregate.Applied);
+        session.ReadVersion.Should().Be(1);
+        session.Aggregate.Version.Should().Be(1);
+        session.Aggregate.Applied.Should().Be(2);
     }
 
     [Fact]
@@ -159,9 +159,9 @@ public sealed class AggregateRepositoryTests
 
         var result = await session.SaveAsync(Ct);
 
-        Assert.False(result.Deduplicated);
-        Assert.Equal(0, result.NextExpectedVersion);
-        Assert.Empty(session.Aggregate.UncommittedEvents);
+        result.Deduplicated.Should().BeFalse();
+        result.NextExpectedVersion.Should().Be(0);
+        session.Aggregate.UncommittedEvents.Should().BeEmpty();
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public sealed class AggregateRepositoryTests
         staleSession.Aggregate.AssignId("counter-1");
         staleSession.Aggregate.Decrement();
 
-        await Assert.ThrowsAsync<ConcurrencyException>(() => staleSession.SaveAsync(Ct).AsTask());
+        await Awaiting(() => staleSession.SaveAsync(Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>();
     }
 
     [Fact]
@@ -211,9 +211,9 @@ public sealed class AggregateRepositoryTests
 
         var result = await repository.SaveAsync(writer, ExpectedVersion.NoStream, Ct);
 
-        Assert.Equal(ExpectedVersion.NoStream, spyStore.LastExpectedVersion);
-        Assert.False(result.Deduplicated);
-        Assert.Equal(0, result.NextExpectedVersion);
+        spyStore.LastExpectedVersion.Should().Be(ExpectedVersion.NoStream);
+        result.Deduplicated.Should().BeFalse();
+        result.NextExpectedVersion.Should().Be(0);
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public sealed class AggregateRepositoryTests
         aggregate.AssignId(string.Empty);
         aggregate.Increment();
 
-        await Assert.ThrowsAsync<ArgumentException>(() => repository.SaveAsync(aggregate, ExpectedVersion.NoStream, Ct).AsTask());
+        await Awaiting(() => repository.SaveAsync(aggregate, ExpectedVersion.NoStream, Ct).AsTask()).Should().ThrowAsync<ArgumentException>();
     }
 
     [Fact]
@@ -234,7 +234,7 @@ public sealed class AggregateRepositoryTests
         var aggregate = new CounterAggregate();
         aggregate.Increment();
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() => repository.SaveAsync(aggregate, ExpectedVersion.NoStream, Ct).AsTask());
+        await Awaiting(() => repository.SaveAsync(aggregate, ExpectedVersion.NoStream, Ct).AsTask()).Should().ThrowAsync<ArgumentNullException>();
     }
 
     [Fact]
@@ -257,11 +257,11 @@ public sealed class AggregateRepositoryTests
         retryAttempt.Increment();
         var retry = await repository.SaveAsync(retryAttempt, ExpectedVersion.NoStream, Ct);
 
-        Assert.False(first.Deduplicated);
-        Assert.True(retry.Deduplicated);
-        Assert.Empty(retryAttempt.UncommittedEvents);
+        first.Deduplicated.Should().BeFalse();
+        retry.Deduplicated.Should().BeTrue();
+        retryAttempt.UncommittedEvents.Should().BeEmpty();
         var stored = await ToListAsync(store.ReadStreamAsync("counter-1", ct: Ct));
-        Assert.Single(stored);
+        stored.Should().ContainSingle();
     }
 
     [Fact]
@@ -278,9 +278,9 @@ public sealed class AggregateRepositoryTests
 
         var expectedMetadata = metadataFactory();
         var stored = await ToListAsync(store.ReadStreamAsync("counter-1", ct: Ct));
-        Assert.Equal(expectedMetadata.MessageId, stored[0].Metadata.MessageId);
-        Assert.Equal(expectedMetadata.CorrelationId, stored[0].Metadata.CorrelationId);
-        Assert.Equal(expectedMetadata.CausationId, stored[0].Metadata.CausationId);
+        stored[0].Metadata.MessageId.Should().Be(expectedMetadata.MessageId);
+        stored[0].Metadata.CorrelationId.Should().Be(expectedMetadata.CorrelationId);
+        stored[0].Metadata.CausationId.Should().Be(expectedMetadata.CausationId);
     }
 
     [Fact]
@@ -296,10 +296,10 @@ public sealed class AggregateRepositoryTests
 
         var result = await repository.SaveAsync(writer, ExpectedVersion.NoStream, Ct);
 
-        Assert.Equal(2, result.NextExpectedVersion);
+        result.NextExpectedVersion.Should().Be(2);
         var stored = await ToListAsync(store.ReadStreamAsync("counter-1", ct: Ct));
-        Assert.Equal(3, stored.Count);
-        Assert.Equal(stored.Select(e => e.EventId).Distinct().Count(), stored.Count);
+        stored.Count.Should().Be(3);
+        stored.Count.Should().Be(stored.Select(e => e.EventId).Distinct().Count());
     }
 
     [Fact]
@@ -314,10 +314,10 @@ public sealed class AggregateRepositoryTests
 
         var result = await repository.SaveAsync(writer, ExpectedVersion.Any, Ct); // nothing new to append
 
-        Assert.False(result.Deduplicated);
-        Assert.Equal(0, result.NextExpectedVersion);
+        result.Deduplicated.Should().BeFalse();
+        result.NextExpectedVersion.Should().Be(0);
         var stored = await ToListAsync(store.ReadStreamAsync("counter-1", ct: Ct));
-        Assert.Single(stored);
+        stored.Should().ContainSingle();
     }
 
     /// <summary>
@@ -342,11 +342,11 @@ public sealed class AggregateRepositoryTests
 
         var secondRepository = CounterEventsRegistry.CreateRepository(store); // a distinct command → distinct MessageId
         var session = await secondRepository.FetchForWritingAsync("counter-1", Ct);
-        Assert.Equal(0, session.ReadVersion); // exactly the 0->1 boundary this test documents
+        session.ReadVersion.Should().Be(0); // exactly the 0->1 boundary this test documents
         session.Aggregate.AssignId("counter-1");
         session.Aggregate.Increment();
 
-        await Assert.ThrowsAsync<ConcurrencyException>(() => session.SaveAsync(Ct).AsTask());
+        await Awaiting(() => session.SaveAsync(Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>();
     }
 
     /// <summary>Records the <c>expectedVersion</c> passed to the last <c>AppendAsync</c> call, delegating everything else.</summary>

@@ -9,9 +9,9 @@ public sealed class UserRefTests
     [Fact]
     public void Constructor_ValueWithAtSign_ThrowsArgumentException()
     {
-        var ex = Assert.Throws<ArgumentException>(() => new UserRef("user@example.com"));
+        var ex = Invoking(() => new UserRef("user@example.com")).Should().Throw<ArgumentException>().Which;
 
-        Assert.Equal("value", ex.ParamName);
+        ex.ParamName.Should().Be("value");
     }
 
     [Fact]
@@ -19,17 +19,17 @@ public sealed class UserRefTests
     {
         var tooLong = new string('a', 129);
 
-        var ex = Assert.Throws<ArgumentException>(() => new UserRef(tooLong));
+        var ex = Invoking(() => new UserRef(tooLong)).Should().Throw<ArgumentException>().Which;
 
-        Assert.Equal("value", ex.ParamName);
+        ex.ParamName.Should().Be("value");
     }
 
     [Fact]
     public void Constructor_NullValue_ThrowsArgumentException()
     {
-        var ex = Assert.Throws<ArgumentException>(() => new UserRef(null!));
+        var ex = Invoking(() => new UserRef(null!)).Should().Throw<ArgumentException>().Which;
 
-        Assert.Equal("value", ex.ParamName);
+        ex.ParamName.Should().Be("value");
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class UserRefTests
 
         var userRef = new UserRef(guid);
 
-        Assert.Equal(guid, userRef.Value);
+        userRef.Value.Should().Be(guid);
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class UserRefTests
         var guid = Guid.CreateVersion7().ToString();
         var userRef = new UserRef(guid);
 
-        Assert.Equal(guid, userRef.ToString());
+        userRef.ToString().Should().Be(guid);
     }
 
     [Fact]
@@ -56,8 +56,8 @@ public sealed class UserRefTests
     {
         const string rejected = "user@example.com";
 
-        var ex = Assert.Throws<ArgumentException>(() => new UserRef(rejected));
+        var ex = Invoking(() => new UserRef(rejected)).Should().Throw<ArgumentException>().Which;
 
-        Assert.DoesNotContain(rejected, ex.Message);
+        ex.Message.Should().NotContain(rejected);
     }
 }

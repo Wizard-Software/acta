@@ -9,7 +9,7 @@ public sealed class GlobalPositionTests
     [Fact]
     public void Start_IsZero()
     {
-        Assert.Equal(0, GlobalPosition.Start.Value);
+        GlobalPosition.Start.Value.Should().Be(0);
     }
 
     [Fact]
@@ -18,9 +18,9 @@ public sealed class GlobalPositionTests
         var lower = new GlobalPosition(1);
         var higher = new GlobalPosition(2);
 
-        Assert.True(lower.CompareTo(higher) < 0);
-        Assert.True(higher.CompareTo(lower) > 0);
-        Assert.Equal(0, lower.CompareTo(new GlobalPosition(1)));
+        (lower.CompareTo(higher) < 0).Should().BeTrue();
+        (higher.CompareTo(lower) > 0).Should().BeTrue();
+        lower.CompareTo(new GlobalPosition(1)).Should().Be(0);
     }
 
     [Theory]
@@ -33,10 +33,10 @@ public sealed class GlobalPositionTests
         var a = new GlobalPosition(aValue);
         var b = new GlobalPosition(bValue);
 
-        Assert.Equal(expectedLess, a < b);
-        Assert.Equal(expectedGreater, a > b);
-        Assert.Equal(expectedLessOrEqual, a <= b);
-        Assert.Equal(expectedGreaterOrEqual, a >= b);
+        (a < b).Should().Be(expectedLess);
+        (a > b).Should().Be(expectedGreater);
+        (a <= b).Should().Be(expectedLessOrEqual);
+        (a >= b).Should().Be(expectedGreaterOrEqual);
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public sealed class GlobalPositionTests
         var a = new GlobalPosition(42);
         var b = new GlobalPosition(42);
 
-        Assert.Equal(a, b);
-        Assert.True(a == b);
+        b.Should().Be(a);
+        (a == b).Should().BeTrue();
     }
 }

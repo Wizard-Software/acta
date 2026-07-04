@@ -22,11 +22,11 @@ public sealed class EventModelRecordsTests
 
         var eventData = new EventData(eventId, "OrderPlaced", 1, payload, metadata);
 
-        Assert.Equal(eventId, eventData.EventId);
-        Assert.Equal("OrderPlaced", eventData.EventType);
-        Assert.Equal(1, eventData.SchemaVersion);
-        Assert.Equal(payload, eventData.Payload.ToArray());
-        Assert.Same(metadata, eventData.Metadata);
+        eventData.EventId.Should().Be(eventId);
+        eventData.EventType.Should().Be("OrderPlaced");
+        eventData.SchemaVersion.Should().Be(1);
+        eventData.Payload.ToArray().Should().Equal(payload);
+        eventData.Metadata.Should().BeSameAs(metadata);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class EventModelRecordsTests
         var first = new EventData(eventId, "OrderPlaced", 1, payload, metadata);
         var second = new EventData(eventId, "OrderPlaced", 1, payload, metadata);
 
-        Assert.Equal(first, second);
+        second.Should().Be(first);
     }
 
     [Fact]
@@ -54,15 +54,15 @@ public sealed class EventModelRecordsTests
         var storedEvent = new StoredEvent(
             eventId, "stream-1", 3, globalPosition, "OrderPlaced", 1, payload, metadata, timestamp);
 
-        Assert.Equal(eventId, storedEvent.EventId);
-        Assert.Equal("stream-1", storedEvent.StreamId);
-        Assert.Equal(3, storedEvent.Version);
-        Assert.Equal(globalPosition, storedEvent.GlobalPosition);
-        Assert.Equal("OrderPlaced", storedEvent.EventType);
-        Assert.Equal(1, storedEvent.SchemaVersion);
-        Assert.Equal(payload, storedEvent.Payload.ToArray());
-        Assert.Same(metadata, storedEvent.Metadata);
-        Assert.Equal(timestamp, storedEvent.Timestamp);
+        storedEvent.EventId.Should().Be(eventId);
+        storedEvent.StreamId.Should().Be("stream-1");
+        storedEvent.Version.Should().Be(3);
+        storedEvent.GlobalPosition.Should().Be(globalPosition);
+        storedEvent.EventType.Should().Be("OrderPlaced");
+        storedEvent.SchemaVersion.Should().Be(1);
+        storedEvent.Payload.ToArray().Should().Equal(payload);
+        storedEvent.Metadata.Should().BeSameAs(metadata);
+        storedEvent.Timestamp.Should().Be(timestamp);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class EventModelRecordsTests
         var second = new StoredEvent(
             eventId, "stream-1", 3, globalPosition, "OrderPlaced", 1, payload, metadata, timestamp);
 
-        Assert.Equal(first, second);
+        second.Should().Be(first);
     }
 
     [Fact]
@@ -92,15 +92,15 @@ public sealed class EventModelRecordsTests
 
         var sourcedEvent = new SourcedEvent(clrEvent, raw);
 
-        Assert.Same(clrEvent, sourcedEvent.Event);
-        Assert.Same(raw, sourcedEvent.Raw);
+        sourcedEvent.Event.Should().BeSameAs(clrEvent);
+        sourcedEvent.Raw.Should().BeSameAs(raw);
     }
 
     [Fact]
     public void Direction_HasForwardsAndBackwards()
     {
-        Assert.True(Enum.IsDefined(Direction.Forwards));
-        Assert.True(Enum.IsDefined(Direction.Backwards));
-        Assert.NotEqual(Direction.Forwards, Direction.Backwards);
+        Enum.IsDefined(Direction.Forwards).Should().BeTrue();
+        Enum.IsDefined(Direction.Backwards).Should().BeTrue();
+        Direction.Backwards.Should().NotBe(Direction.Forwards);
     }
 }

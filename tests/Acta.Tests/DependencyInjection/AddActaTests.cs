@@ -45,7 +45,7 @@ public sealed class AddActaTests
 
         var store = provider.GetRequiredService<IEventStore>();
 
-        Assert.IsType<InMemoryEventStore>(store);
+        store.Should().BeOfType<InMemoryEventStore>();
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class AddActaTests
 
         var serializer = provider.GetRequiredService<EventSerializer>();
 
-        Assert.NotNull(serializer);
+        serializer.Should().NotBeNull();
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public sealed class AddActaTests
 
         var registry = provider.GetRequiredService<EventTypeRegistry>();
 
-        Assert.NotNull(registry);
+        registry.Should().NotBeNull();
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class AddActaTests
 
         var factory = provider.GetRequiredService<Func<EventMetadata>>();
 
-        Assert.NotNull(factory);
+        factory.Should().NotBeNull();
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public sealed class AddActaTests
 
         var repository = provider.GetRequiredService<IAggregateRepository<CounterAggregate>>();
 
-        Assert.NotNull(repository);
+        repository.Should().NotBeNull();
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class AddActaTests
         var first = provider.GetRequiredService<IEventStore>();
         var second = provider.GetRequiredService<IEventStore>();
 
-        Assert.Same(first, second);
+        second.Should().BeSameAs(first);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class AddActaTests
         var first = provider.GetRequiredService<EventSerializer>();
         var second = provider.GetRequiredService<EventSerializer>();
 
-        Assert.Same(first, second);
+        second.Should().BeSameAs(first);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public sealed class AddActaTests
         var first = provider.GetRequiredService<EventTypeRegistry>();
         var second = provider.GetRequiredService<EventTypeRegistry>();
 
-        Assert.Same(first, second);
+        second.Should().BeSameAs(first);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public sealed class AddActaTests
         var first = provider.GetRequiredService<IAggregateRepository<CounterAggregate>>();
         var second = provider.GetRequiredService<IAggregateRepository<CounterAggregate>>();
 
-        Assert.Same(first, second);
+        second.Should().BeSameAs(first);
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public sealed class AddActaTests
         services.AddActa();
         services.AddActa();
 
-        Assert.Single(services, d => d.ServiceType == typeof(IEventStore));
+        services.Should().ContainSingle(d => d.ServiceType == typeof(IEventStore));
     }
 
     [Fact]
@@ -150,8 +150,8 @@ public sealed class AddActaTests
 
         var registry = provider.GetRequiredService<EventTypeRegistry>();
 
-        Assert.True(registry.TryResolveClrType(nameof(Incremented), out var clrType));
-        Assert.Equal(typeof(Incremented), clrType);
+        registry.TryResolveClrType(nameof(Incremented), out var clrType).Should().BeTrue();
+        clrType.Should().Be(typeof(Incremented));
     }
 
     [Fact]
@@ -163,10 +163,10 @@ public sealed class AddActaTests
         var first = factory();
         var second = factory();
 
-        Assert.NotEqual(first.MessageId, second.MessageId);
-        Assert.Equal(first.MessageId, first.CorrelationId);
-        Assert.Equal(first.MessageId, first.CausationId);
-        Assert.NotEqual(default, first.Timestamp);
+        second.MessageId.Should().NotBe(first.MessageId);
+        first.CorrelationId.Should().Be(first.MessageId);
+        first.CausationId.Should().Be(first.MessageId);
+        first.Timestamp.Should().NotBe(default);
     }
 
     [Fact]
@@ -176,14 +176,14 @@ public sealed class AddActaTests
         var repository = provider.GetRequiredService<IAggregateRepository<CounterAggregate>>();
 
         var session = await repository.FetchForWritingAsync("counter-dogfood", Ct);
-        Assert.Equal(-1, session.ReadVersion);
+        session.ReadVersion.Should().Be(-1);
         session.Aggregate.AssignId("counter-dogfood");
         session.Aggregate.Increment();
         await repository.SaveAsync(session.Aggregate, session.ReadVersion, Ct);
 
         var loaded = await repository.GetByIdAsync("counter-dogfood", Ct);
 
-        Assert.NotNull(loaded);
-        Assert.Equal(1, loaded.Applied);
+        loaded.Should().NotBeNull();
+        loaded.Applied.Should().Be(1);
     }
 }
