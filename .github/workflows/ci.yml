@@ -62,13 +62,20 @@ jobs:
           dotnet test tests/Acta.ArchitectureTests/Acta.ArchitectureTests.csproj
           -c Release -p:ContinuousIntegrationBuild=true
 
-  # ── Gate 3: mutation testing (Stryker.NET >= 80% on src/Acta) ──────────────
+  # ── Gate 3: mutation testing (Stryker.NET >= 80%) ─────────────────────────
+  # On PRs the >=80% threshold is enforced on CHANGED code only (--since), so a
+  # weakly tested new file cannot be masked by the aggregate score over the whole
+  # core (an aggregate gate lets undertested new code slip through). Push to main:
+  # full run as an aggregate trend/drift backstop.
   mutation:
-    name: "Gate 3 — mutation (Stryker >= 80%)"
+    name: "Gate 3 — mutation (Stryker >= 80% on changed code)"
     runs-on: ubuntu-latest
     needs: architecture-tests
     steps:
+      # fetch-depth: 0 + base fetch so Stryker's --since can diff PR changes against the base branch.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           global-json-file: global.json
@@ -76,14 +83,24 @@ jobs:
           cache-dependency-path: "**/packages.lock.json"
       - name: Restore tools (dotnet-stryker)
         run: dotnet tool restore
-      # Empty-skeleton guard: the gate is green with 0 mutants and blocking (Stryker exit
-      # code, break=80 in stryker-config.json) on real code. We key on the presence of the
-      # report + the mutant count, NOT just on the JSON body.
+      - name: Fetch base branch (diff-scoped mutation on PRs)
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin ${{ github.base_ref }}
+      # Zero-mutant guard: green with 0 mutants, blocking (Stryker exit code, break=80 in
+      # stryker-config.json) on real mutants. 0 mutants means either an empty skeleton or —
+      # under --since on a PR — a change that touches no production code (test/docs-only).
+      # We key on the presence of the report + the mutant count, NOT just on the JSON body.
       - name: Run Stryker (guarded)
         run: |
           set -uo pipefail
           set +e
-          dotnet stryker > stryker.log 2>&1
+          # PR: enforce >=80% on CHANGED code only (--since), so a weak new file cannot be
+          # masked by the aggregate over the whole core. Push to main: full run for trend.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            dotnet stryker --since:origin/${{ github.base_ref }} > stryker.log 2>&1
+          else
+            dotnet stryker > stryker.log 2>&1
+          fi
           stryker_exit=$?
           set -e
           tail -20 stryker.log || true
