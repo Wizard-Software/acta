@@ -14,6 +14,8 @@
     <PackageReference Include="CsCheck" />
     <!-- Needed for ServiceCollection/BuildServiceProvider in AddActa DI tests (task 3.3). -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <!-- FakeTimeProvider for deterministic ProjectionDaemon polling/backpressure tests (task 5.2). -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <!-- Project-wide fluent assertions: Should() plus the Invoking()/Awaiting() delegate

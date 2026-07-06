@@ -9,6 +9,14 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <!-- Async projection daemon (task 5.2 — BackgroundService/IHostedService); ADR-005. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Expose internals to the unit test project so ProjectionDaemon.RunTickAsync (internal) can
+         be driven deterministically without a background thread or a real clock (task 5.2, D9). -->
+    <InternalsVisibleTo Include="Acta.Tests" />
   </ItemGroup>
 
 </Project>
