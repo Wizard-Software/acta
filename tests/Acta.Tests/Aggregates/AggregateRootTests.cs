@@ -101,4 +101,60 @@ public sealed class AggregateRootTests
         aggregate.UncommittedEvents.Should().BeEmpty();
         aggregate.Version.Should().Be(1);
     }
+
+    /// <summary>D1 default: an aggregate that never overrides <c>CaptureState</c> reports "snapshotting unsupported".</summary>
+    [Fact]
+    public void TakeSnapshot_AggregateWithoutOverride_ReturnsNull()
+    {
+        var aggregate = new CounterAggregate();
+
+        var snapshot = aggregate.TakeSnapshot();
+
+        snapshot.Should().BeNull();
+    }
+
+    [Fact]
+    public void SnapshotSchemaVersion_AggregateWithoutOverride_DefaultsToZero()
+    {
+        var aggregate = new CounterAggregate();
+
+        aggregate.SnapshotSchemaVersion.Should().Be(0);
+    }
+
+    [Fact]
+    public void TakeSnapshot_SnapshotableAggregate_ReturnsCapturedState()
+    {
+        var aggregate = new SnapshotCounter();
+        aggregate.Increment();
+        aggregate.Increment();
+
+        var snapshot = aggregate.TakeSnapshot();
+
+        snapshot.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void RestoreFromSnapshot_FreshAggregate_RestoresCapturedStateAndSetsVersion()
+    {
+        var writer = new SnapshotCounter();
+        writer.Increment();
+        writer.Increment();
+        var state = writer.TakeSnapshot()!.Value;
+
+        var restored = new SnapshotCounter();
+        restored.RestoreFromSnapshot(state, writer.Version);
+
+        restored.Value.Should().Be(writer.Value);
+        restored.Version.Should().Be(writer.Version);
+    }
+
+    /// <summary>Task 6.1 invariant guard: restoring a snapshot into an aggregate that already has history would silently discard that history, so it throws instead.</summary>
+    [Fact]
+    public void RestoreFromSnapshot_AlreadyHydratedAggregate_ThrowsInvalidOperationException()
+    {
+        var aggregate = new SnapshotCounter();
+        aggregate.Increment(); // Version becomes 0 — no longer the fresh -1 RestoreFromSnapshot requires.
+
+        Invoking(() => aggregate.RestoreFromSnapshot(new byte[] { 1 }, 0)).Should().Throw<InvalidOperationException>();
+    }
 }

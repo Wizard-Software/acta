@@ -1,11 +1,14 @@
 using Xunit;
 
+using System.Text.Json;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using Acta.Abstractions;
 using Acta.Configuration;
+using Acta.Correlation;
 using Acta.InMemory;
 using Acta.Serialization;
 using Acta.Tests.TestSupport;
@@ -214,6 +217,136 @@ public sealed class AddActaTests
 
         metadata.Timestamp.Should().Be(fixedInstant);
     }
+
+    [Fact]
+    public void AddActa_RegistersResolvableCorrelationContextAccessor()
+    {
+        using var provider = BuildProvider();
+
+        var first = provider.GetRequiredService<ICorrelationContextAccessor>();
+        first.Should().BeOfType<AsyncLocalCorrelationContextAccessor>();
+
+        var second = provider.GetRequiredService<ICorrelationContextAccessor>();
+        second.Should().BeSameAs(first);
+    }
+
+    [Fact]
+    public void MetadataFactory_WithinCorrelationScope_InheritsCorrelationAndCausation()
+    {
+        using var provider = BuildProvider();
+        var accessor = provider.GetRequiredService<ICorrelationContextAccessor>();
+        var factory = provider.GetRequiredService<Func<EventMetadata>>();
+
+        var scopeContext = new CorrelationContext
+        {
+            CorrelationId = Guid.CreateVersion7(),
+            CausationId = Guid.CreateVersion7(),
+            User = new UserRef("technical-account-id"),
+            TenantId = "tenant-1",
+            TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            TraceState = "vendor=value",
+        };
+
+        EventMetadata metadata;
+        using (accessor.BeginScope(scopeContext))
+        {
+            metadata = factory();
+        }
+
+        metadata.CorrelationId.Should().Be(scopeContext.CorrelationId);
+        metadata.CausationId.Should().Be(scopeContext.CausationId);
+        metadata.MessageId.Should().NotBe(scopeContext.CorrelationId);
+        metadata.MessageId.Should().NotBe(scopeContext.CausationId);
+        metadata.User.Should().Be(scopeContext.User);
+        metadata.TenantId.Should().Be(scopeContext.TenantId);
+        metadata.TraceParent.Should().Be(scopeContext.TraceParent);
+        metadata.TraceState.Should().Be(scopeContext.TraceState);
+    }
+
+    [Fact]
+    public void MetadataFactory_NoScope_RemainsRootSelfCorrelated()
+    {
+        using var provider = BuildProvider();
+        var factory = provider.GetRequiredService<Func<EventMetadata>>();
+
+        var metadata = factory();
+
+        metadata.CorrelationId.Should().Be(metadata.MessageId);
+        metadata.CausationId.Should().Be(metadata.MessageId);
+    }
+
+    [Fact]
+    public void AddActa_Default_RegistersResolvableInMemorySnapshotStore()
+    {
+        using var provider = BuildProvider();
+
+        var store = provider.GetRequiredService<ISnapshotStore>();
+
+        store.Should().BeOfType<InMemorySnapshotStore>();
+    }
+
+    [Fact]
+    public void AddActa_TwoResolves_ReturnSameSnapshotStoreSingletonInstance()
+    {
+        using var provider = BuildProvider();
+
+        var first = provider.GetRequiredService<ISnapshotStore>();
+        var second = provider.GetRequiredService<ISnapshotStore>();
+
+        second.Should().BeSameAs(first);
+    }
+
+    [Fact]
+    public void AddActa_CalledTwice_RegistersExactlyOneSnapshotStoreServiceDescriptor()
+    {
+        var services = new ServiceCollection();
+
+        services.AddActa();
+        services.AddActa();
+
+        services.Should().ContainSingle(d => d.ServiceType == typeof(ISnapshotStore));
+    }
+
+    [Fact]
+    public void AddActa_Default_RegistersResolvableAggregateRepositoryForSnapshotCounter()
+    {
+        using var provider = BuildProvider();
+
+        var repository = provider.GetRequiredService<IAggregateRepository<SnapshotCounter>>();
+
+        repository.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Task 6.1 (n): proves the snapshot-first path is genuinely wired end-to-end through
+    /// <c>AddActa()</c> — not merely that both services happen to resolve. The planted snapshot
+    /// deliberately claims a <see cref="SnapshotCounter.Value"/> the real event stream never
+    /// produced, so the assertion below can only pass if the resolved repository actually restored
+    /// FROM this snapshot instead of replaying events.
+    /// </summary>
+    [Fact]
+    public async Task AddActa_ResolvedSnapshotCounterRepository_ConsultsTheInjectedSnapshotStoreOnLoad()
+    {
+        using var provider = BuildProvider(o => o.Events.Register<Incremented>().Register<Decremented>());
+        var repository = provider.GetRequiredService<IAggregateRepository<SnapshotCounter>>();
+        var snapshotStore = provider.GetRequiredService<ISnapshotStore>();
+
+        var writer = new SnapshotCounter();
+        writer.AssignId("counter-di-snapshot");
+        writer.Increment();
+        await repository.SaveAsync(writer, ExpectedVersion.NoStream, Ct); // stream holds exactly one event (Value == 1)
+
+        var plantedState = JsonSerializer.SerializeToUtf8Bytes(new PlantedState(99));
+        await snapshotStore.SaveAsync(
+            new Snapshot("counter-di-snapshot", writer.Version, writer.SnapshotSchemaVersion, plantedState, DateTimeOffset.UtcNow), Ct);
+
+        var loaded = await repository.GetByIdAsync("counter-di-snapshot", Ct);
+
+        loaded.Should().NotBeNull();
+        loaded!.Value.Should().Be(99);
+    }
+
+    private readonly record struct PlantedState(int Value);
 
     private sealed class FixedTimeProvider(DateTimeOffset instant) : TimeProvider
     {
