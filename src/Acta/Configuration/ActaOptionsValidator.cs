@@ -40,6 +40,15 @@ internal sealed class ActaOptionsValidator(ILogger<ActaOptionsValidator> logger)
             failures.Add($"{nameof(ActaOptions.Events)} must not be null.");
         }
 
+        if (options.Daemon is null)
+        {
+            failures.Add($"{nameof(ActaOptions.Daemon)} must not be null.");
+        }
+        else
+        {
+            ValidateDaemon(options.Daemon, failures);
+        }
+
         if (failures.Count > 0)
         {
             return ValidateOptionsResult.Fail(failures);
@@ -61,5 +70,43 @@ internal sealed class ActaOptionsValidator(ILogger<ActaOptionsValidator> logger)
             "AddActa registered the in-memory event store — SINGLE-PROCESS ONLY (ADR-014, D14). For any topology with more than one pod use AddActaPostgres. In-memory guarantees hold only within one process.");
 
         return ValidateOptionsResult.Success;
+    }
+
+    /// <summary>
+    /// Fail-fast bounds for <see cref="ProjectionDaemonOptions"/> (task 5.2, 03-contracts §2/§3):
+    /// <see cref="ProjectionDaemonOptions.BatchSize"/> and
+    /// <see cref="ProjectionDaemonOptions.PendingEventsThreshold"/> strictly positive;
+    /// <see cref="ProjectionDaemonOptions.PollingInterval"/> and
+    /// <see cref="ProjectionDaemonOptions.VisibilityLag"/> strictly positive (a non-positive
+    /// <c>BatchSize</c> would fault <c>ReadBatchAsync</c>'s <c>ThrowIfNegativeOrZero(maxCount)</c>
+    /// outside the daemon's per-projection halt guard; <c>VisibilityLag &gt; 0</c> is required by
+    /// 03-contracts §3); <see cref="ProjectionDaemonOptions.GapSafeHarborTimeout"/> non-negative.
+    /// </summary>
+    private static void ValidateDaemon(ProjectionDaemonOptions daemon, List<string> failures)
+    {
+        if (daemon.BatchSize <= 0)
+        {
+            failures.Add($"{nameof(ActaOptions.Daemon)}.{nameof(ProjectionDaemonOptions.BatchSize)} must be greater than zero.");
+        }
+
+        if (daemon.PendingEventsThreshold <= 0)
+        {
+            failures.Add($"{nameof(ActaOptions.Daemon)}.{nameof(ProjectionDaemonOptions.PendingEventsThreshold)} must be greater than zero.");
+        }
+
+        if (daemon.PollingInterval <= TimeSpan.Zero)
+        {
+            failures.Add($"{nameof(ActaOptions.Daemon)}.{nameof(ProjectionDaemonOptions.PollingInterval)} must be greater than zero.");
+        }
+
+        if (daemon.VisibilityLag <= TimeSpan.Zero)
+        {
+            failures.Add($"{nameof(ActaOptions.Daemon)}.{nameof(ProjectionDaemonOptions.VisibilityLag)} must be greater than zero.");
+        }
+
+        if (daemon.GapSafeHarborTimeout < TimeSpan.Zero)
+        {
+            failures.Add($"{nameof(ActaOptions.Daemon)}.{nameof(ProjectionDaemonOptions.GapSafeHarborTimeout)} must not be negative.");
+        }
     }
 }

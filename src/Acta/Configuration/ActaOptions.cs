@@ -39,4 +39,12 @@ public sealed class ActaOptions
     /// seeded with <see cref="JsonSerializerDefaults.Web"/>; the host may replace it entirely.
     /// </summary>
     public JsonSerializerOptions SerializerOptions { get; set; } = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Configuration for the asynchronous projection daemon (task 5.2). Additive, non-breaking:
+    /// this is the reader foreshadowed by the type remarks — the daemon (Feature 5) is the component
+    /// that consumes it. Defaults to a fresh <see cref="ProjectionDaemonOptions"/> with the
+    /// 03-contracts §2 defaults; validated fail-fast at host startup.
+    /// </summary>
+    public ProjectionDaemonOptions Daemon { get; set; } = new();
 }
