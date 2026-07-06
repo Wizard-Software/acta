@@ -53,9 +53,9 @@ namespace Acta.Projections.Daemon;
 /// <para>
 /// <b>Graceful stop.</b> Cancellation (host stop) ends the loop after the current batch — a batch
 /// cancelled in flight does not save its checkpoint, so the events replay safely on restart
-/// (idempotent, at-least-once). A <see cref="CheckpointFencedException"/> drops leadership of that
-/// projection and reloads its checkpoint next tick (Postgres readiness; the in-memory sink never
-/// fences, D8).
+/// (idempotent, at-least-once). A <see cref="CheckpointFencedException"/> makes the daemon STOP
+/// leading that projection: this instance's owner token is permanently stale, so re-leading it would
+/// re-apply events and re-fence on every tick (Postgres readiness; the in-memory sink never fences, D8).
 /// </para>
 /// <para>
 /// <b>Gap policy (task 5.3 — <see cref="GapGuard"/>, ADR-001 R3).</b> A projection's
@@ -255,8 +255,9 @@ public sealed class ProjectionDaemon : BackgroundService
                     }
                     catch (CheckpointFencedException)
                     {
-                        // Same zombie-guard as the batch-apply path below: drop leadership and reload
-                        // the checkpoint next tick rather than rethrow (D8).
+                        // Same zombie-guard as the batch-apply path below: a fence means this daemon lost
+                        // leadership, so stop leading the projection (its owner token is permanently stale)
+                        // rather than rethrow (D8). Re-leading would re-fence every tick with the same token.
                         registration.DropLeadership();
                         registration.ExitCatchUp();
                         break;
@@ -305,8 +306,10 @@ public sealed class ProjectionDaemon : BackgroundService
                 }
                 catch (CheckpointFencedException)
                 {
-                    // Zombie-guard (Postgres readiness; the in-memory sink never fences — D8): drop
-                    // leadership and reload the checkpoint next tick. The daemon does not rethrow.
+                    // Zombie-guard (Postgres readiness; the in-memory sink never fences — D8): a fence
+                    // means this daemon lost leadership, so stop leading the projection — re-leading would
+                    // re-apply events and re-fence every tick with the same permanently-stale owner token.
+                    // The daemon does not rethrow.
                     registration.DropLeadership();
                     registration.ExitCatchUp();
                     break;

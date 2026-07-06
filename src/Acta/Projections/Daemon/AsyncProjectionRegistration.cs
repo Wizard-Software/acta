@@ -118,11 +118,20 @@ public sealed class AsyncProjectionRegistration
     internal void CacheCheckpoint(GlobalPosition position) => CachedCheckpoint = position;
 
     /// <summary>
-    /// Drops leadership after a <see cref="CheckpointFencedException"/>: invalidates the cached
-    /// checkpoint so the next tick reloads it from the sink (zombie-guard, Postgres readiness — the
-    /// in-memory sink never fences, D8). Single-process has no lock to release (no-op there).
+    /// Abandons this projection after a <see cref="CheckpointFencedException"/> (zombie-guard, Postgres
+    /// readiness — the in-memory sink never fences, D8). A fence means this daemon instance lost
+    /// leadership, and its owner token is fixed for the instance's lifetime, so it is now permanently
+    /// stale for this projection: the daemon must STOP leading it (<see cref="IsHalted"/>) rather than
+    /// re-lead it — re-leading would re-apply events and re-save, re-fencing on every tick with the same
+    /// stale token (an endless zombie loop). The cached checkpoint is also cleared. Re-establishing
+    /// leadership is a restart / re-election concern (7.5/7.6), not something the daemon recovers from
+    /// in place. Single-process has no lock to release (no-op there).
     /// </summary>
-    internal void DropLeadership() => CachedCheckpoint = null;
+    internal void DropLeadership()
+    {
+        IsHalted = true;
+        CachedCheckpoint = null;
+    }
 
     /// <summary>
     /// Records <paramref name="now"/> as the first-observed time of the currently-tracked

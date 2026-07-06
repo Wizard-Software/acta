@@ -6,9 +6,9 @@ namespace Acta.Tests.TestSupport;
 /// An <see cref="ICheckpointSink"/> test double that always fences (task 5.2, fence handling test):
 /// <see cref="SaveAsync"/> throws <see cref="CheckpointFencedException"/> on every call, and
 /// <see cref="LoadAsync"/> returns <see langword="null"/> while counting its invocations — so a test
-/// can assert the daemon reloads the checkpoint on the next tick after dropping leadership. The
-/// in-memory sink never fences (D8); this double exercises the daemon's zombie-guard path for
-/// Postgres readiness.
+/// can assert the daemon STOPS leading the projection after a fence (the owner token is permanently
+/// stale) instead of re-leading and re-fencing every tick. The in-memory sink never fences (D8); this
+/// double exercises the daemon's zombie-guard path for Postgres readiness.
 /// </summary>
 public sealed class FencingCheckpointSink : ICheckpointSink
 {

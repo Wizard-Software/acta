@@ -162,22 +162,28 @@ public sealed class ProjectionDaemonTests
     }
 
     [Fact]
-    public async Task RunTickAsync_FencingSink_DropsLeadershipAndReloadsCheckpointNextTickWithoutThrowing()
+    public async Task RunTickAsync_FencingSink_HaltsProjectionAndStopsLeadingItAfterFence()
     {
+        // A fenced checkpoint save means this daemon lost leadership; its fixed per-instance owner
+        // token is now permanently stale. The zombie-guard must STOP leading the projection — not
+        // re-lead it every tick, re-applying events and re-fencing forever with the same stale token.
         var kit = new AsyncProjectionTestKit();
         await kit.AppendAsync(Ct, new Incremented());
         var fencing = new FencingCheckpointSink();
-        var daemon = kit.Daemon(
-            new ProjectionDaemonOptions(),
-            [kit.Registration("counter", AsyncProjectionTestKit.IncrementedOnly, new RecordingProjection<Incremented>())],
-            checkpoints: fencing);
+        var projection = new RecordingProjection<Incremented>();
+        var registration = kit.Registration("counter", AsyncProjectionTestKit.IncrementedOnly, projection);
+        var daemon = kit.Daemon(new ProjectionDaemonOptions(), [registration], checkpoints: fencing);
 
+        // First tick: apply the event, the checkpoint save fences → the projection is abandoned.
         await Awaiting(() => daemon.RunTickAsync(Ct).AsTask()).Should().NotThrowAsync();
-        var loadsAfterFirst = fencing.LoadCallCount;
+        var savesAfterFence = fencing.SaveCallCount;
+        // Second tick: the halted projection must NOT be led again.
         await Awaiting(() => daemon.RunTickAsync(Ct).AsTask()).Should().NotThrowAsync();
 
-        fencing.SaveCallCount.Should().BeGreaterThanOrEqualTo(1);
-        fencing.LoadCallCount.Should().BeGreaterThan(loadsAfterFirst);
+        fencing.SaveCallCount.Should().BeGreaterThanOrEqualTo(1); // the first save fenced
+        registration.IsHalted.Should().BeTrue();                  // stopped leading it (zombie-guard)
+        fencing.SaveCallCount.Should().Be(savesAfterFence);       // no further fenced save on the next tick
+        projection.Applied.Should().HaveCount(1);                 // event never re-applied under the stale token
     }
 
     [Fact]
