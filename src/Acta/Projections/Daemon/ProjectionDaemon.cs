@@ -57,6 +57,17 @@ namespace Acta.Projections.Daemon;
 /// projection and reloads its checkpoint next tick (Postgres readiness; the in-memory sink never
 /// fences, D8).
 /// </para>
+/// <para>
+/// <b>Gap policy (task 5.3 — <see cref="GapGuard"/>, ADR-001 R3).</b> A projection's
+/// checkpoint sitting below the safe HWM after an empty matching-event batch either faces a
+/// non-matching tail (correction V-2 — no gap, current behavior unchanged) or a true hole in
+/// <see cref="GlobalPosition"/>. <see cref="GapGuard.Evaluate"/> tells the two apart via a cheap
+/// raw-stream peek and decides whether a true gap should be waited on (a still-in-flight write may
+/// yet fill it) or skipped now — advancing the checkpoint past it through the same fenced CAS save
+/// used by the batch-apply path, and recording the skip (<c>acta.projection.gaps_skipped</c> plus a
+/// diagnostic warning) via <see cref="GapGuard.RecordSkip"/>. This branch is semantically disjoint
+/// from the apply-error policy above: it only fires when there are no matching events left to apply.
+/// </para>
 /// </summary>
 public sealed class ProjectionDaemon : BackgroundService
 {
@@ -68,6 +79,7 @@ public sealed class ProjectionDaemon : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ProjectionDaemon> _logger;
     private readonly DeadLetterBuffer _deadLetters;
+    private readonly GapGuard _gapGuard;
 
     // One owner token per daemon instance (leadership fencing, D7). The in-memory sink validates it
     // non-empty but never compares it (Tier-1 has no split-brain); Postgres (7.5/7.6) enforces it.
@@ -86,12 +98,14 @@ public sealed class ProjectionDaemon : BackgroundService
     /// <param name="options">The Acta options carrying <see cref="ActaOptions.Daemon"/>.</param>
     /// <param name="logger">The logger for the error policy and lifecycle notices.</param>
     /// <param name="deadLetters">The shared, in-memory dead-letter buffer the error policy records poisoned events into (task 5.4).</param>
+    /// <param name="gapGuard">The gap policy consulted when a projection's checkpoint is trapped under the safe HWM (task 5.3).</param>
     /// <param name="timeProvider">The clock for polling delays and dead-letter timestamps; <see langword="null"/> resolves to <see cref="TimeProvider.System"/> (V-1, mirrors <c>InMemoryEventStore</c>).</param>
     /// <exception cref="ArgumentNullException">A required collaborator is <see langword="null"/>.</exception>
     // timeProvider is the optional trailing parameter (V-1): the composition root does not register a
     // TimeProvider, so a required one would fault DI resolution; an optional default lets the daemon
-    // resolve via ActivatorUtilities without one. Ordered after logger/deadLetters because C# requires
-    // optional parameters to be trailing (the only deviation from the plan §2.4 parameter order).
+    // resolve via ActivatorUtilities without one. Ordered after gapGuard/deadLetters because C#
+    // requires optional parameters to be trailing (the only deviation from the plan §2.4 parameter
+    // order — mirrors the same deviation already made for deadLetters in task 5.4).
     public ProjectionDaemon(
         ISubscriptionSource source,
         ICheckpointSink checkpoints,
@@ -100,6 +114,7 @@ public sealed class ProjectionDaemon : BackgroundService
         IOptions<ActaOptions> options,
         ILogger<ProjectionDaemon> logger,
         DeadLetterBuffer deadLetters,
+        GapGuard gapGuard,
         TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -109,6 +124,7 @@ public sealed class ProjectionDaemon : BackgroundService
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(deadLetters);
+        ArgumentNullException.ThrowIfNull(gapGuard);
 
         _source = source;
         _checkpoints = checkpoints;
@@ -118,6 +134,7 @@ public sealed class ProjectionDaemon : BackgroundService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
         _deadLetters = deadLetters;
+        _gapGuard = gapGuard;
     }
 
     /// <inheritdoc/>
@@ -203,7 +220,58 @@ public sealed class ProjectionDaemon : BackgroundService
 
             if (batch.Count == 0)
             {
-                registration.ExitCatchUp(); // V-2: no matching events remain up to the HWM → caught up.
+                // Checkpoint < hwm but no matching events remain — either a non-matching tail (V-2)
+                // or a true GlobalPosition gap (task 5.3). Peek the RAW, unfiltered stream: a
+                // non-empty peek means events exist above the checkpoint that this projection's
+                // filter simply does not match (no gap); an empty peek means a true hole reaching
+                // the HWM. One element is enough — existence, not content, is all the guard needs.
+                var rawEventExistsAboveCheckpoint = false;
+                await foreach (var _ in _source.ReadFromAsync(checkpoint, ct).ConfigureAwait(false))
+                {
+                    rawEventExistsAboveCheckpoint = true;
+                    break;
+                }
+
+                var now = _timeProvider.GetUtcNow();
+                var verdict = _gapGuard.Evaluate(checkpoint, hwm, rawEventExistsAboveCheckpoint, registration.GapObservedAt, now);
+
+                if (verdict == GapVerdict.WaitSafeHarbor)
+                {
+                    registration.SetGapObserved(now); // Stable first-observed timestamp (no-op if already set).
+                    registration.ExitCatchUp();
+                    break;
+                }
+
+                if (verdict == GapVerdict.SkipPermanent)
+                {
+                    var gapFrom = checkpoint;
+                    checkpoint = hwm; // Strictly forward — this branch only runs when checkpoint < hwm.
+
+                    try
+                    {
+                        await _checkpoints
+                            .SaveAsync(registration.Name, tenantId: null, checkpoint, _ownerToken, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch (CheckpointFencedException)
+                    {
+                        // Same zombie-guard as the batch-apply path below: drop leadership and reload
+                        // the checkpoint next tick rather than rethrow (D8).
+                        registration.DropLeadership();
+                        registration.ExitCatchUp();
+                        break;
+                    }
+
+                    registration.CacheCheckpoint(checkpoint);
+                    _gapGuard.RecordSkip(registration.Name, gapFrom, hwm);
+                    registration.ClearGapObserved();
+                    registration.ExitCatchUp();
+                    break;
+                }
+
+                // NoGap: the current V-2 behavior — no matching events remain up to the HWM → caught up.
+                registration.ClearGapObserved();
+                registration.ExitCatchUp();
                 break;
             }
 

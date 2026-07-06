@@ -69,14 +69,21 @@ public sealed class AsyncProjectionTestKit
     public AsyncProjectionRegistration Registration(string name, IReadOnlySet<string> eventTypes, object projection, ProjectionErrorPolicy errorPolicy)
         => new(name, eventTypes, new InlineProjectionRunner(Serializer, Registry, [projection]), errorPolicy);
 
-    /// <summary>Builds a fully-wired daemon over the kit's store, with overridable source/sink/clock/logger.</summary>
+    /// <summary>Builds a fully-wired daemon over the kit's store, with overridable source/sink/clock/logger/gap-guard.</summary>
+    /// <param name="gapGuard">
+    /// The gap policy (task 5.3); <see langword="null"/> builds a default one over <paramref name="options"/>,
+    /// a fresh <see cref="ProjectionDaemonMetrics"/>, <see cref="NullLogger{T}"/>, and this call's
+    /// <paramref name="timeProvider"/> — enough for tests that only care about the daemon's other
+    /// behavior. A test asserting on the gap guard's metric or log output supplies its own instance.
+    /// </param>
     public ProjectionDaemon Daemon(
         ProjectionDaemonOptions options,
         IEnumerable<AsyncProjectionRegistration> registrations,
         ISubscriptionSource? source = null,
         ICheckpointSink? checkpoints = null,
         TimeProvider? timeProvider = null,
-        ILogger<ProjectionDaemon>? logger = null)
+        ILogger<ProjectionDaemon>? logger = null,
+        GapGuard? gapGuard = null)
         => new(
             source ?? Source(),
             checkpoints ?? Checkpoints,
@@ -85,6 +92,7 @@ public sealed class AsyncProjectionTestKit
             Options.Create(new ActaOptions { Daemon = options }),
             logger ?? NullLogger<ProjectionDaemon>.Instance,
             DeadLetters,
+            gapGuard ?? new GapGuard(options, new ProjectionDaemonMetrics(), NullLogger<GapGuard>.Instance, timeProvider),
             timeProvider);
 
     private static EventMetadata NewMetadata() => new()

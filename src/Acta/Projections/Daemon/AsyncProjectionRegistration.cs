@@ -97,6 +97,14 @@ public sealed class AsyncProjectionRegistration
     /// </summary>
     internal GlobalPosition? CachedCheckpoint { get; private set; }
 
+    /// <summary>
+    /// The wall-clock time this projection's current <see cref="GlobalPosition"/> gap was first
+    /// observed by the daemon, or <see langword="null"/> when no gap is currently being tracked (task
+    /// 5.3 — the safe-harbor timer <see cref="GapGuard.Evaluate"/> measures elapsed time against).
+    /// Set once via <see cref="SetGapObserved"/> and cleared via <see cref="ClearGapObserved"/>.
+    /// </summary>
+    internal DateTimeOffset? GapObservedAt { get; private set; }
+
     /// <summary>Marks this projection faulted so the daemon stops leading it (baseline halt, 5.2).</summary>
     internal void Halt() => IsHalted = true;
 
@@ -115,4 +123,20 @@ public sealed class AsyncProjectionRegistration
     /// in-memory sink never fences, D8). Single-process has no lock to release (no-op there).
     /// </summary>
     internal void DropLeadership() => CachedCheckpoint = null;
+
+    /// <summary>
+    /// Records <paramref name="now"/> as the first-observed time of the currently-tracked
+    /// <see cref="GlobalPosition"/> gap — but only if none is already recorded (task 5.3), so the
+    /// first-observed timestamp stays stable across ticks while the same gap persists (the safe-harbor
+    /// timer measures elapsed time from the FIRST observation, not the most recent one).
+    /// </summary>
+    /// <param name="now">The current wall-clock time to stamp the gap with, if not already tracking one.</param>
+    internal void SetGapObserved(DateTimeOffset now) => GapObservedAt ??= now;
+
+    /// <summary>
+    /// Clears the tracked gap's first-observed timestamp (task 5.3) — called once a tick finds no gap
+    /// (<see cref="GapVerdict.NoGap"/>) or skips a permanent one (<see cref="GapVerdict.SkipPermanent"/>),
+    /// so a later, unrelated gap starts its own safe-harbor timer from a fresh first observation.
+    /// </summary>
+    internal void ClearGapObserved() => GapObservedAt = null;
 }

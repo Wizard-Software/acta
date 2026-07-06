@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using Acta.Abstractions;
@@ -68,6 +69,21 @@ public static class AsyncProjectionServiceCollectionExtensions
 
         // Shared, in-memory dead-letter buffer the daemon's error policy records poisoned events into (5.4).
         services.TryAddSingleton<DeadLetterBuffer>();
+
+        // Gap policy (task 5.3): the shared metrics owner (acta.projection.gaps_skipped, falls back
+        // to new Meter("Acta") when the host never called AddMetrics()) and the pure decision guard
+        // ProjectionDaemon consults when a projection's checkpoint is trapped under the safe HWM.
+        // GapGuard needs a factory (like HwmPoller below): its ProjectionDaemonOptions parameter is
+        // required, but only IOptions<ActaOptions> is registered, never ProjectionDaemonOptions on
+        // its own — plain ActivatorUtilities construction cannot resolve it. TimeProvider is resolved
+        // optionally (GetService, not GetRequiredService) so the daemon's own V-1 fallback still
+        // applies when the host never registered one.
+        services.TryAddSingleton<ProjectionDaemonMetrics>();
+        services.TryAddSingleton(sp => new GapGuard(
+            sp.GetRequiredService<IOptions<ActaOptions>>().Value.Daemon,
+            sp.GetRequiredService<ProjectionDaemonMetrics>(),
+            sp.GetRequiredService<ILogger<GapGuard>>(),
+            sp.GetService<TimeProvider>()));
 
         // Safe high-water-mark poller (IEventStore + the daemon options carrying VisibilityLag).
         services.TryAddSingleton(sp => new HwmPoller(

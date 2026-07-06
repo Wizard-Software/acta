@@ -144,6 +144,28 @@ public sealed class AsyncProjectionServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void AddActaAsyncProjection_RegistersGapGuardAndMetricsAsSingletons_AndResolvesTheDaemon()
+    {
+        // Task 5.3: ProjectionDaemonMetrics and GapGuard are internal, but ActivatorUtilities still
+        // resolves them (and the daemon's new gapGuard constructor parameter) without the host having
+        // to call AddMetrics() — the metrics owner falls back to new Meter("Acta") (D3).
+        var services = BaseServices();
+        services.AddActa();
+        services.AddActaAsyncProjection<SampleProjection>("sample", SampleTypes);
+        using var provider = services.BuildServiceProvider();
+
+        var firstMetrics = provider.GetRequiredService<ProjectionDaemonMetrics>();
+        var secondMetrics = provider.GetRequiredService<ProjectionDaemonMetrics>();
+        var firstGuard = provider.GetRequiredService<GapGuard>();
+        var secondGuard = provider.GetRequiredService<GapGuard>();
+        var hosted = provider.GetServices<IHostedService>().OfType<ProjectionDaemon>();
+
+        firstMetrics.Should().BeSameAs(secondMetrics);
+        firstGuard.Should().BeSameAs(secondGuard);
+        hosted.Should().ContainSingle();
+    }
+
+    [Fact]
     public void AddActaAsyncProjection_WithoutErrorPolicy_RegistrationCarriesDeadLetterAndSkipDefault()
     {
         var services = BaseServices();
