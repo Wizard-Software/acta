@@ -137,7 +137,7 @@ public sealed class ProjectionDaemonTests
     }
 
     [Fact]
-    public async Task RunTickAsync_HaltedProjection_IsNotLedOnSubsequentTicks()
+    public async Task RunTickAsync_PausedProjection_IsNotLedOnSubsequentTicks()
     {
         var kit = new AsyncProjectionTestKit();
         await kit.AppendAsync(Ct, new Incremented());
@@ -150,12 +150,15 @@ public sealed class ProjectionDaemonTests
                 throw new InvalidOperationException("boom");
             },
         };
-        var daemon = kit.Daemon(new ProjectionDaemonOptions(), [kit.Registration("faulting", AsyncProjectionTestKit.IncrementedOnly, faulting)]);
+        // Pause with MaxRetries 0 == the 5.2 baseline halt-on-first-failure: task 5.4 moved that
+        // semantics under the ErrorAction.Pause policy (the default is now DeadLetterAndSkip).
+        var pauseImmediately = new ProjectionErrorPolicy(ErrorAction.Pause, MaxRetries: 0);
+        var daemon = kit.Daemon(new ProjectionDaemonOptions(), [kit.Registration("faulting", AsyncProjectionTestKit.IncrementedOnly, faulting, pauseImmediately)]);
 
         await daemon.RunTickAsync(Ct);
         await daemon.RunTickAsync(Ct);
 
-        applyCount.Should().Be(1); // halted after the first failure — never attempted again
+        applyCount.Should().Be(1); // paused after the first failure — never attempted again
     }
 
     [Fact]

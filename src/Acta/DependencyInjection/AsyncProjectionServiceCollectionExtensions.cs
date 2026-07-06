@@ -46,11 +46,16 @@ public static class AsyncProjectionServiceCollectionExtensions
     /// <param name="services">The service collection to register the projection into.</param>
     /// <param name="name">The projection name — the checkpoint key. Must be non-empty.</param>
     /// <param name="eventTypes">The event-type filter pushed down to <c>ReadBatchAsync</c>. Must be non-null.</param>
+    /// <param name="errorPolicy">
+    /// The per-projection retry/dead-letter/pause policy (task 5.4); <see langword="null"/> resolves to
+    /// <c>new ProjectionErrorPolicy()</c> (dead-letter-and-skip, three retries) — an additive, trailing
+    /// optional parameter so existing call sites keep compiling unchanged.
+    /// </param>
     /// <returns><paramref name="services"/>, to allow fluent chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="eventTypes"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is null or empty.</exception>
     public static IServiceCollection AddActaAsyncProjection<TProjection>(
-        this IServiceCollection services, string name, IReadOnlySet<string> eventTypes)
+        this IServiceCollection services, string name, IReadOnlySet<string> eventTypes, ProjectionErrorPolicy? errorPolicy = null)
         where TProjection : class
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -60,6 +65,9 @@ public static class AsyncProjectionServiceCollectionExtensions
         // Ports in-memory (closes D8 from 5.1 — the daemon is the consumer that was deferred).
         services.TryAddSingleton<ISubscriptionSource>(sp => new InMemorySubscriptionSource(sp.GetRequiredService<IEventStore>()));
         services.TryAddSingleton<ICheckpointSink>(_ => new InMemoryCheckpointSink());
+
+        // Shared, in-memory dead-letter buffer the daemon's error policy records poisoned events into (5.4).
+        services.TryAddSingleton<DeadLetterBuffer>();
 
         // Safe high-water-mark poller (IEventStore + the daemon options carrying VisibilityLag).
         services.TryAddSingleton(sp => new HwmPoller(
@@ -83,7 +91,8 @@ public static class AsyncProjectionServiceCollectionExtensions
                 new InlineProjectionRunner(
                     sp.GetRequiredService<EventSerializer>(),
                     sp.GetRequiredService<EventTypeRegistry>(),
-                    [sp.GetRequiredService<TProjection>()])));
+                    [sp.GetRequiredService<TProjection>()]),
+                errorPolicy));
         }
 
         return services;

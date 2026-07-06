@@ -16,9 +16,10 @@ namespace Acta.Projections.Daemon;
 /// <para>
 /// <b>One tick</b> (<see cref="RunTickAsync"/>): read the safe high-water mark once and share it
 /// across projections (P×T → 1), then, per non-halted projection, drain matching events in batches
-/// of <see cref="ProjectionDaemonOptions.BatchSize"/> from its checkpoint — dispatch each batch
-/// through the reused <c>InlineProjectionRunner</c> (ordered, idempotent apply) and advance the
-/// checkpoint via a fenced <c>ICheckpointSink.SaveAsync</c>.
+/// of <see cref="ProjectionDaemonOptions.BatchSize"/> from its checkpoint — dispatch its events
+/// through the reused <c>InlineProjectionRunner</c> (ordered, idempotent apply, one event at a time
+/// under the error policy) and advance the checkpoint once per batch via a fenced
+/// <c>ICheckpointSink.SaveAsync</c>.
 /// </para>
 /// <para>
 /// <b>Backpressure / catch-up.</b> A projection with a matching backlog past
@@ -30,15 +31,24 @@ namespace Acta.Projections.Daemon;
 /// events are non-matching — from wedging the daemon in a zero-delay busy-spin (correction V-2).
 /// </para>
 /// <para>
-/// <b>Baseline error policy (5.2; full policy = 5.4).</b> An exception from a projection's apply
-/// halts THAT projection (logged at <see cref="LogLevel.Error"/> with the exception type and
-/// message only — never the payload/event/metadata, ADR-008/017) while the daemon and every other
-/// projection continue (ADR-005 — one poisoned event never stops the daemon). Task 5.4 replaces the
-/// halt with retry → dead-letter | pause.
-/// <b>Caveat:</b> the daemon logs the exception verbatim, so a host projection whose own
-/// <c>ApplyAsync</c> builds an exception message from record data (e.g. <c>$"failed for {order.Email}"</c>)
-/// surfaces that text to the log sink — the library adds no payload but cannot scrub a caller-authored
-/// message; hosts must keep PII out of their exception messages (mirrors <c>InlineProjectionRunner</c>).
+/// <b>Error policy (task 5.4 — retry → dead-letter | pause).</b> An event whose apply throws is
+/// retried, in place, up to <see cref="ProjectionErrorPolicy.MaxRetries"/> times — safe because of
+/// the reused runner's mark-after-apply idempotency watermark, so a retry only ever re-applies the
+/// still-unwatermarked poisoned event. Once retries are exhausted, the event is recorded in the
+/// shared <see cref="DeadLetterBuffer"/> and the projection's
+/// <see cref="ProjectionErrorPolicy.OnApplyError"/> decides what happens next:
+/// <see cref="ErrorAction.DeadLetterAndSkip"/> advances the checkpoint past the poisoned event so the
+/// projection and the daemon keep running; <see cref="ErrorAction.Pause"/> halts THAT projection only
+/// — the checkpoint stops right before the poisoned event, so a rebuild or a manual resume retries it
+/// — while the daemon and every other projection continue either way (ADR-005 — one poisoned event
+/// never stops the daemon).
+/// <b>Caveat:</b> a dead-letter entry's <c>Error</c> field, and the accompanying
+/// <see cref="LogLevel.Error"/> log line, carry the failing exception's type and message only — never
+/// the payload/event/metadata (ADR-008/017) — but neither can scrub a caller-authored exception
+/// message: a host projection whose own <c>ApplyAsync</c> builds an exception message from record
+/// data (e.g. <c>$"failed for {order.Email}"</c>) surfaces that text into both verbatim. Hosts must
+/// keep PII out of their exception messages (mirrors <c>InlineProjectionRunner</c> and
+/// <see cref="DeadLetterBuffer"/>'s own caveat).
 /// </para>
 /// <para>
 /// <b>Graceful stop.</b> Cancellation (host stop) ends the loop after the current batch — a batch
@@ -57,6 +67,7 @@ public sealed class ProjectionDaemon : BackgroundService
     private readonly ProjectionDaemonOptions _daemon;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ProjectionDaemon> _logger;
+    private readonly DeadLetterBuffer _deadLetters;
 
     // One owner token per daemon instance (leadership fencing, D7). The in-memory sink validates it
     // non-empty but never compares it (Tier-1 has no split-brain); Postgres (7.5/7.6) enforces it.
@@ -73,13 +84,14 @@ public sealed class ProjectionDaemon : BackgroundService
     /// <param name="hwmPoller">The safe high-water-mark poller (one read per tick, shared).</param>
     /// <param name="projections">The registered async projections to lead (all of them — single-process).</param>
     /// <param name="options">The Acta options carrying <see cref="ActaOptions.Daemon"/>.</param>
-    /// <param name="logger">The logger for the baseline error policy and lifecycle notices.</param>
-    /// <param name="timeProvider">The clock for polling delays; <see langword="null"/> resolves to <see cref="TimeProvider.System"/> (V-1, mirrors <c>InMemoryEventStore</c>).</param>
+    /// <param name="logger">The logger for the error policy and lifecycle notices.</param>
+    /// <param name="deadLetters">The shared, in-memory dead-letter buffer the error policy records poisoned events into (task 5.4).</param>
+    /// <param name="timeProvider">The clock for polling delays and dead-letter timestamps; <see langword="null"/> resolves to <see cref="TimeProvider.System"/> (V-1, mirrors <c>InMemoryEventStore</c>).</param>
     /// <exception cref="ArgumentNullException">A required collaborator is <see langword="null"/>.</exception>
     // timeProvider is the optional trailing parameter (V-1): the composition root does not register a
     // TimeProvider, so a required one would fault DI resolution; an optional default lets the daemon
-    // resolve via ActivatorUtilities without one. Ordered after logger because C# requires optional
-    // parameters to be trailing (the only deviation from the plan §2.4 parameter order).
+    // resolve via ActivatorUtilities without one. Ordered after logger/deadLetters because C# requires
+    // optional parameters to be trailing (the only deviation from the plan §2.4 parameter order).
     public ProjectionDaemon(
         ISubscriptionSource source,
         ICheckpointSink checkpoints,
@@ -87,6 +99,7 @@ public sealed class ProjectionDaemon : BackgroundService
         IEnumerable<AsyncProjectionRegistration> projections,
         IOptions<ActaOptions> options,
         ILogger<ProjectionDaemon> logger,
+        DeadLetterBuffer deadLetters,
         TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -95,6 +108,7 @@ public sealed class ProjectionDaemon : BackgroundService
         ArgumentNullException.ThrowIfNull(projections);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(deadLetters);
 
         _source = source;
         _checkpoints = checkpoints;
@@ -103,6 +117,7 @@ public sealed class ProjectionDaemon : BackgroundService
         _daemon = options.Value.Daemon;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        _deadLetters = deadLetters;
     }
 
     /// <inheritdoc/>
@@ -192,47 +207,51 @@ public sealed class ProjectionDaemon : BackgroundService
                 break;
             }
 
-            try
+            // Per-event dispatch so the error policy (retry → dead-letter | pause) can act on a single
+            // poisoned event without stopping the batch. The checkpoint is still saved ONCE per batch
+            // boundary (lastGood) — never per event — to preserve the 5.2 CAS write cadence.
+            var lastGood = checkpoint;
+            var paused = false;
+            foreach (var stored in batch)
             {
-                await registration.Runner.RunAsync(batch, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw; // Graceful stop — do not save the checkpoint for the unfinished batch (safe, idempotent replay).
-            }
-#pragma warning disable CA1031 // Baseline error policy (5.2): a projection apply may throw anything; halting THIS projection (not the daemon) is the deliberate contract (ADR-005). Full retry/dead-letter/pause = 5.4.
-            catch (Exception ex)
-#pragma warning restore CA1031
-            {
-                registration.Halt();
-                registration.ExitCatchUp();
+                var outcome = await ApplyWithPolicyAsync(registration, stored, ct).ConfigureAwait(false);
+                if (outcome == ApplyOutcome.Paused)
+                {
+                    paused = true; // Pause: stop leading this projection; do NOT advance past the poisoned event.
+                    break;
+                }
 
-                // Log the exception (type + message) only — NEVER the payload/event/metadata (ADR-008/017).
-                _logger.LogError(
-                    ex,
-                    "Async projection {ProjectionName} halted after a failed apply; the daemon and other projections continue.",
-                    registration.Name);
+                // Applied, or dead-lettered-and-skipped — both advance the checkpoint past this event.
+                lastGood = stored.GlobalPosition;
+            }
+
+            if (lastGood > checkpoint)
+            {
+                checkpoint = lastGood;
+
+                try
+                {
+                    await _checkpoints
+                        .SaveAsync(registration.Name, tenantId: null, checkpoint, _ownerToken, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (CheckpointFencedException)
+                {
+                    // Zombie-guard (Postgres readiness; the in-memory sink never fences — D8): drop
+                    // leadership and reload the checkpoint next tick. The daemon does not rethrow.
+                    registration.DropLeadership();
+                    registration.ExitCatchUp();
+                    break;
+                }
+
+                registration.CacheCheckpoint(checkpoint);
+            }
+
+            if (paused)
+            {
+                registration.ExitCatchUp(); // Paused projection is no longer led — checkpoint stayed before the poison.
                 break;
             }
-
-            checkpoint = batch[^1].GlobalPosition;
-
-            try
-            {
-                await _checkpoints
-                    .SaveAsync(registration.Name, tenantId: null, checkpoint, _ownerToken, ct)
-                    .ConfigureAwait(false);
-            }
-            catch (CheckpointFencedException)
-            {
-                // Zombie-guard (Postgres readiness; the in-memory sink never fences — D8): drop
-                // leadership and reload the checkpoint next tick. The daemon does not rethrow.
-                registration.DropLeadership();
-                registration.ExitCatchUp();
-                break;
-            }
-
-            registration.CacheCheckpoint(checkpoint);
 
             if (batch.Count < _daemon.BatchSize)
             {
@@ -250,6 +269,90 @@ public sealed class ProjectionDaemon : BackgroundService
             }
 
             registration.ExitCatchUp(); // Full batch under threshold — keep draining within this tick.
+        }
+    }
+
+    /// <summary>The result of applying one event under a projection's <see cref="ProjectionErrorPolicy"/>.</summary>
+    private enum ApplyOutcome
+    {
+        /// <summary>The event was applied successfully (possibly after one or more retries).</summary>
+        Applied,
+
+        /// <summary>Retries were exhausted and the policy skipped the event (<see cref="ErrorAction.DeadLetterAndSkip"/>); the checkpoint advances past it.</summary>
+        Skipped,
+
+        /// <summary>Retries were exhausted and the policy paused the projection (<see cref="ErrorAction.Pause"/>); the checkpoint does not advance past the event.</summary>
+        Paused,
+    }
+
+    /// <summary>
+    /// Applies one event to a projection under its <see cref="ProjectionErrorPolicy"/>: dispatch through
+    /// the reused runner (a single-element batch keeps its ordering + mark-after-apply idempotency), and
+    /// on a persistent failure retry up to <see cref="ProjectionErrorPolicy.MaxRetries"/> times before
+    /// recording the poisoned event in the <see cref="DeadLetterBuffer"/> and acting on
+    /// <see cref="ProjectionErrorPolicy.OnApplyError"/>. A retry is safe because the runner never advances
+    /// its watermark past an event whose apply threw, so it only ever re-applies the still-failing event
+    /// (never re-applies an already-applied one).
+    /// </summary>
+    /// <param name="registration">The projection being led, carrying its runner and error policy.</param>
+    /// <param name="stored">The single event to apply.</param>
+    /// <param name="ct">A token to observe for cancellation (graceful stop rethrows before any policy handling).</param>
+    /// <returns>Whether the event was applied, dead-lettered-and-skipped, or the projection was paused.</returns>
+    private async ValueTask<ApplyOutcome> ApplyWithPolicyAsync(
+        AsyncProjectionRegistration registration, StoredEvent stored, CancellationToken ct)
+    {
+        var policy = registration.ErrorPolicy;
+        IReadOnlyList<StoredEvent> single = [stored];
+        var attempts = 0;
+
+        while (true)
+        {
+            try
+            {
+                await registration.Runner.RunAsync(single, ct).ConfigureAwait(false);
+                return ApplyOutcome.Applied;
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // Graceful stop — propagate; not an apply error, no checkpoint saved for the unfinished batch.
+            }
+#pragma warning disable CA1031 // Error policy (5.4): a projection apply may throw anything; retry → dead-letter | pause (never a daemon crash) is the deliberate contract (ADR-005).
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                attempts++; // Total apply attempts so far (the initial attempt plus every retry).
+                if (attempts <= policy.MaxRetries)
+                {
+                    continue; // Retry in place — idempotent via the runner's mark-after-apply watermark.
+                }
+
+                // Retries exhausted. Record the poisoned event (type + message only, never the
+                // payload/event/metadata — ADR-008/017) into the shared dead-letter buffer.
+                _deadLetters.Record(registration.Name, tenantId: null, stored.GlobalPosition, attempts, ex, _timeProvider.GetUtcNow());
+
+                if (policy.OnApplyError == ErrorAction.Pause)
+                {
+                    registration.Halt();
+
+                    // Log the exception (type + message) only — see the DeadLetterBuffer caveat: neither
+                    // this log nor the entry can scrub a caller-authored exception message.
+                    _logger.LogError(
+                        ex,
+                        "Async projection {ProjectionName} paused after {Attempts} failed apply attempts at position {Position}; the daemon and other projections continue.",
+                        registration.Name,
+                        attempts,
+                        stored.GlobalPosition.Value);
+                    return ApplyOutcome.Paused;
+                }
+
+                _logger.LogError(
+                    ex,
+                    "Async projection {ProjectionName} dead-lettered and skipped position {Position} after {Attempts} failed apply attempts; the projection and daemon continue.",
+                    registration.Name,
+                    stored.GlobalPosition.Value,
+                    attempts);
+                return ApplyOutcome.Skipped;
+            }
         }
     }
 }

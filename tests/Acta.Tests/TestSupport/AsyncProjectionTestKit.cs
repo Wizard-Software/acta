@@ -40,6 +40,9 @@ public sealed class AsyncProjectionTestKit
     /// <summary>The default in-memory checkpoint sink (a test may substitute its own).</summary>
     public InMemoryCheckpointSink Checkpoints { get; } = new();
 
+    /// <summary>The shared dead-letter buffer the daemon's error policy records poisoned events into (task 5.4).</summary>
+    public DeadLetterBuffer DeadLetters { get; } = new();
+
     /// <summary>Creates a kit with a serializer bound to a fresh registry.</summary>
     public AsyncProjectionTestKit() => Serializer = new EventSerializer(Registry, JsonSerializerOptions.Default);
 
@@ -58,9 +61,13 @@ public sealed class AsyncProjectionTestKit
     /// <summary>A fresh in-memory subscription source over <see cref="Store"/>.</summary>
     public ISubscriptionSource Source() => new InMemorySubscriptionSource(Store);
 
-    /// <summary>Builds a registration wrapping <paramref name="projection"/> in a single-projection runner.</summary>
+    /// <summary>Builds a registration wrapping <paramref name="projection"/> in a single-projection runner (default error policy).</summary>
     public AsyncProjectionRegistration Registration(string name, IReadOnlySet<string> eventTypes, object projection)
         => new(name, eventTypes, new InlineProjectionRunner(Serializer, Registry, [projection]));
+
+    /// <summary>Builds a registration wrapping <paramref name="projection"/> in a single-projection runner with an explicit <paramref name="errorPolicy"/> (task 5.4).</summary>
+    public AsyncProjectionRegistration Registration(string name, IReadOnlySet<string> eventTypes, object projection, ProjectionErrorPolicy errorPolicy)
+        => new(name, eventTypes, new InlineProjectionRunner(Serializer, Registry, [projection]), errorPolicy);
 
     /// <summary>Builds a fully-wired daemon over the kit's store, with overridable source/sink/clock/logger.</summary>
     public ProjectionDaemon Daemon(
@@ -77,6 +84,7 @@ public sealed class AsyncProjectionTestKit
             registrations,
             Options.Create(new ActaOptions { Daemon = options }),
             logger ?? NullLogger<ProjectionDaemon>.Instance,
+            DeadLetters,
             timeProvider);
 
     private static EventMetadata NewMetadata() => new()

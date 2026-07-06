@@ -12,10 +12,11 @@ namespace Acta.Projections.Daemon;
 /// watermark).
 /// <para>
 /// This is deliberately NOT the full <c>ProjectionDefinition(Name, EventTypes, ErrorPolicy, Mode)</c>
-/// of MODULE-INTERFACES §Grupa 5: <c>ErrorPolicy</c>/<c>Mode</c> have no executor in 5.2, so
-/// introducing a public type without a reader would violate CONSTITUTION §2 (ASK FIRST). The full
-/// definition (and the retry/dead-letter/pause policy) materializes with task 5.4; this internal
-/// core type is designed for <c>ErrorPolicy</c> to attach additively then (mitigation R-D).
+/// of MODULE-INTERFACES §Grupa 5: <c>Mode</c> still has no executor (Tier 1/2 only ever runs Async
+/// registrations here), so introducing it without a reader would violate CONSTITUTION §2 (ASK
+/// FIRST). <see cref="ErrorPolicy"/> (task 5.4) attached additively, exactly as foreshadowed by the
+/// original 5.2 design (mitigation R-D) — the retry/dead-letter/pause policy engine that consumes it
+/// lives in <see cref="ProjectionDaemon"/>.
 /// </para>
 /// <para>
 /// <b>Lead state.</b> The mutable fields below (<see cref="IsHalted"/>, <see cref="IsInCatchUp"/>,
@@ -27,15 +28,25 @@ namespace Acta.Projections.Daemon;
 public sealed class AsyncProjectionRegistration
 {
     /// <summary>
-    /// Creates a registration binding a projection name, its event-type filter, and its
-    /// single-projection dispatcher.
+    /// Creates a registration binding a projection name, its event-type filter, its
+    /// single-projection dispatcher, and its error policy.
     /// </summary>
     /// <param name="name">The projection name — the checkpoint key (<c>Load/SaveAsync</c>).</param>
     /// <param name="eventTypes">The event-type filter pushed down to <c>ReadBatchAsync</c>.</param>
     /// <param name="runner">The dispatcher for this one projection (built over a single <c>IProjection</c>).</param>
+    /// <param name="errorPolicy">
+    /// The retry/dead-letter/pause policy for this projection's apply failures (task 5.4);
+    /// <see langword="null"/> resolves to <c>new ProjectionErrorPolicy()</c> (dead-letter-and-skip,
+    /// three retries) — an additive, trailing optional parameter so existing call sites keep
+    /// compiling unchanged.
+    /// </param>
     /// <exception cref="ArgumentException"><paramref name="name"/> is null or empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="eventTypes"/> or <paramref name="runner"/> is null.</exception>
-    public AsyncProjectionRegistration(string name, IReadOnlySet<string> eventTypes, InlineProjectionRunner runner)
+    public AsyncProjectionRegistration(
+        string name,
+        IReadOnlySet<string> eventTypes,
+        InlineProjectionRunner runner,
+        ProjectionErrorPolicy? errorPolicy = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
         ArgumentNullException.ThrowIfNull(eventTypes);
@@ -44,6 +55,7 @@ public sealed class AsyncProjectionRegistration
         Name = name;
         EventTypes = eventTypes;
         Runner = runner;
+        ErrorPolicy = errorPolicy ?? new ProjectionErrorPolicy();
     }
 
     /// <summary>The projection name — the checkpoint key for <c>ICheckpointSink.Load/SaveAsync</c>.</summary>
@@ -56,9 +68,18 @@ public sealed class AsyncProjectionRegistration
     public InlineProjectionRunner Runner { get; }
 
     /// <summary>
-    /// <see langword="true"/> once this projection has faulted (baseline error policy, 5.2): the
-    /// daemon stops leading it while the daemon and every other projection continue (ADR-005 — one
-    /// poisoned event never stops the daemon). The full retry/dead-letter/pause policy is task 5.4.
+    /// The retry/dead-letter/pause policy this projection's apply failures are governed by (task
+    /// 5.4). Defaults to <c>new ProjectionErrorPolicy()</c> (dead-letter-and-skip, three retries)
+    /// when not supplied at construction.
+    /// </summary>
+    public ProjectionErrorPolicy ErrorPolicy { get; }
+
+    /// <summary>
+    /// <see langword="true"/> once this projection has been halted — either by the error policy's
+    /// <see cref="ErrorAction.Pause"/> action after retries were exhausted (task 5.4), or, before
+    /// task 5.4 existed, by the 5.2 baseline: the daemon stops leading a halted projection while the
+    /// daemon and every other projection continue (ADR-005 — one poisoned event never stops the
+    /// daemon).
     /// </summary>
     internal bool IsHalted { get; private set; }
 

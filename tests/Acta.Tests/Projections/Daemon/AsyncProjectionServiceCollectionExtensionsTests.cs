@@ -128,4 +128,46 @@ public sealed class AsyncProjectionServiceCollectionExtensionsTests
         Invoking(() => provider.GetServices<IHostedService>().ToList())
             .Should().Throw<InvalidOperationException>();
     }
+
+    [Fact]
+    public void AddActaAsyncProjection_RegistersDeadLetterBufferAsSingleton()
+    {
+        var services = BaseServices();
+        services.AddActa();
+        services.AddActaAsyncProjection<SampleProjection>("sample", SampleTypes);
+        using var provider = services.BuildServiceProvider();
+
+        var first = provider.GetRequiredService<DeadLetterBuffer>();
+        var second = provider.GetRequiredService<DeadLetterBuffer>();
+
+        first.Should().BeSameAs(second); // singleton — the daemon and any diagnostics share one buffer
+    }
+
+    [Fact]
+    public void AddActaAsyncProjection_WithoutErrorPolicy_RegistrationCarriesDeadLetterAndSkipDefault()
+    {
+        var services = BaseServices();
+        services.AddActa();
+        services.AddActaAsyncProjection<SampleProjection>("sample", SampleTypes);
+        using var provider = services.BuildServiceProvider();
+
+        var registration = provider.GetServices<AsyncProjectionRegistration>().Should().ContainSingle().Subject;
+
+        registration.ErrorPolicy.OnApplyError.Should().Be(ErrorAction.DeadLetterAndSkip);
+        registration.ErrorPolicy.MaxRetries.Should().Be(3);
+    }
+
+    [Fact]
+    public void AddActaAsyncProjection_WithExplicitErrorPolicy_CarriesItOnTheRegistration()
+    {
+        var services = BaseServices();
+        services.AddActa();
+        var policy = new ProjectionErrorPolicy(ErrorAction.Pause, MaxRetries: 5);
+        services.AddActaAsyncProjection<SampleProjection>("sample", SampleTypes, policy);
+        using var provider = services.BuildServiceProvider();
+
+        var registration = provider.GetServices<AsyncProjectionRegistration>().Should().ContainSingle().Subject;
+
+        registration.ErrorPolicy.Should().Be(policy);
+    }
 }
