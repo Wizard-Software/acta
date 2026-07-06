@@ -1,8 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Given-When-Then test harness (Spec.For<T>()) -> core. -->
+  <!-- Given-When-Then test harness (Spec.For<T>()) -> Acta.Abstractions only.
+       The harness operates directly on AggregateRoot (LoadFromHistory / UncommittedEvents /
+       ClearUncommittedEvents) — it needs no event store and no core implementation (task 4.2, D1). -->
   <ItemGroup>
-    <ProjectReference Include="..\Acta\Acta.csproj" />
+    <ProjectReference Include="..\Acta.Abstractions\Acta.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

@@ -189,7 +189,7 @@
       "acta.testing": {
         "type": "Project",
         "dependencies": {
-          "Acta": "[1.0.0, )"
+          "Acta.Abstractions": "[1.0.0, )"
         }
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
