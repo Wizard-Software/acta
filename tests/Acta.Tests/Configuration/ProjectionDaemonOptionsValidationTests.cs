@@ -40,6 +40,16 @@ public sealed class ProjectionDaemonOptionsValidationTests
         exception.Should().BeNull();
     }
 
+    [Fact]
+    public void Validate_NullDaemon_ThrowsWithDaemonMessage()
+    {
+        using var provider = BuildProvider(o => o.Daemon = null!);
+        var validator = provider.GetRequiredService<IStartupValidator>();
+
+        Invoking(validator.Validate).Should().Throw<OptionsValidationException>()
+            .WithMessage("*Daemon must not be null.*");
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
