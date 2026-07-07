@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Acta.Abstractions;
 using Acta.Configuration;
 using Acta.Postgres.Configuration;
+using Acta.Postgres.Coordination;
 using Acta.Postgres.DependencyInjection;
 using Acta.Postgres.Idempotency;
 using Acta.Postgres.Migrations;
@@ -181,6 +182,15 @@ public static class ActaPostgresServiceCollectionExtensions
             sp.GetRequiredService<NpgsqlDataSource>(),
             sp.GetRequiredService<ActaPostgresOptions>(),
             sp.GetService<ILogger<PostgresIdempotencyStore>>())));
+
+        // Leader elector swap (task 7.5, ADR-005): the advisory-lock elector gives real cross-pod
+        // single-active election (pg_try_advisory_lock on a dedicated connection); session loss =
+        // lock loss = failover. Replace, not TryAdd — override AddActa's in-memory default
+        // unconditionally, mirroring the IEventStore/ISubscriptionSource swaps above.
+        services.Replace(ServiceDescriptor.Singleton<ILeaderElector>(sp => new AdvisoryLockLeaderElector(
+            sp.GetRequiredService<NpgsqlDataSource>(),
+            sp.GetRequiredService<ActaPostgresOptions>(),
+            sp.GetService<ILogger<AdvisoryLockLeaderElector>>())));
 
         services.TryAddSingleton(sp => new MigrationRunner(
             sp.GetRequiredService<NpgsqlDataSource>(),
