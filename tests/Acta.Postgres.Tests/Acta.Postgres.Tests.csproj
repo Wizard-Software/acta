@@ -10,6 +10,16 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="AwesomeAssertions" />
+    <!-- Real PostgreSQL for the integration + coordination suites (ADR-013, Testcontainers). -->
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <!-- Project-wide fluent assertions: Should() plus the Invoking()/Awaiting() delegate
+       wrappers for exception assertions, available without per-file using directives. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+    <Using Include="AwesomeAssertions.FluentActions" Static="true" />
   </ItemGroup>
 
   <!-- Inherits the contract tests from Acta.Tests; adapter + harness. -->
