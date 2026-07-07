@@ -4,15 +4,24 @@ namespace Acta.Postgres.Configuration;
 /// Configuration for the PostgreSQL backend (<c>AddActaPostgres(...)</c>, MODULE-INTERFACES
 /// "Rejestracja DI").
 /// <para>
-/// Task-7.1 shape: this type carries only the configuration a component in Feature 7.1 actually
-/// reads — the schema name consumed by <see cref="Acta.Postgres.Migrations.MigrationRunner"/>.
-/// Fields describing not-yet-existing components (e.g. <c>AutoMigrate</c>, read by
-/// <c>AddActaPostgres</c> at host startup, and the Npgsql pool guidance) are deliberately omitted
-/// to avoid premature public members with no reader (CONSTITUTION §2 ASK FIRST) — they arrive as
-/// non-breaking additive properties in task 7.9 (the DI composition root). This mirrors how
-/// <c>ActaOptions</c> was introduced Tier-1-scoped in task 3.3 and extended later.
+/// This type carries only the configuration a component in the Postgres adapter actually reads:
+/// the schema name consumed by <see cref="Acta.Postgres.Migrations.MigrationRunner"/> and every
+/// store, and <see cref="AutoMigrate"/>, read by the <c>MigrationHostedService</c> registered by
+/// <c>AddActaPostgres</c> (task 7.9). This mirrors how <c>ActaOptions</c> was introduced
+/// Tier-1-scoped in task 3.3 and extended later — no public member is added without a reader
+/// (CONSTITUTION §2 ASK FIRST).
 /// </para>
 /// </summary>
+/// <remarks>
+/// <b>Connection pool sizing (06-cross-cutting §4)</b> is deliberately doc-only — there is no
+/// <c>MaxPoolSize</c> member on this type, because Npgsql already reads pool sizing from the
+/// connection string (or from a host-owned <see cref="Npgsql.NpgsqlDataSource"/> the host built
+/// itself), and a duplicate knob here would be a second, conflicting source of truth. Size the
+/// pool via the connection string's <c>Maximum Pool Size</c> (Npgsql default: <c>100</c>) using
+/// the formula <c>MaxPoolSize &gt;= projections-in-catch-up + host-append-parallelism + 2</c> —
+/// enough connections for every catch-up projection to poll concurrently, for the host's own
+/// append concurrency, and headroom for <c>MigrationRunner</c> plus incidental pool churn.
+/// </remarks>
 public sealed class ActaPostgresOptions
 {
     /// <summary>
@@ -22,4 +31,19 @@ public sealed class ActaPostgresOptions
     /// configuration error, never silently sanitized (audit S1, revision R3, security scan #7).
     /// </summary>
     public string SchemaName { get; set; } = "acta";
+
+    /// <summary>
+    /// Whether <c>AddActaPostgres</c>'s hosted service applies pending schema migrations
+    /// automatically at host startup (default <see langword="true"/>).
+    /// <para>
+    /// <see langword="true"/> is intended for development: the connection string's role needs DDL
+    /// privileges (<c>acta_migrator</c>, 04-data §4.1). <see langword="false"/> is recommended for
+    /// production (04-data §4) — migrations run as a dedicated step in the CD pipeline under the
+    /// <c>acta_migrator</c> role, and the runtime connection string carries only the least-privilege
+    /// <c>acta_runtime</c> role (DML-only, no DDL — see
+    /// <c>Roles/acta-least-privilege-roles.sql</c>). When <see langword="false"/>, the hosted
+    /// service logs a startup warning instead of migrating.
+    /// </para>
+    /// </summary>
+    public bool AutoMigrate { get; set; } = true;
 }

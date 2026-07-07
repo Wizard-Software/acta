@@ -24,10 +24,25 @@ public sealed class PostgresFixture : IAsyncLifetime
 #pragma warning restore CS0618
 
     private NpgsqlDataSource? _dataSource;
+    private string? _connectionString;
 
     /// <summary>The shared data source pointing at the running container (DDL-privileged superuser).</summary>
     public NpgsqlDataSource DataSource =>
         _dataSource ?? throw new InvalidOperationException("Fixture not initialized.");
+
+    /// <summary>
+    /// The raw connection string (including credentials) the container was started with — for tests
+    /// exercising <c>AddActaPostgres(string connectionString, ...)</c>.
+    /// <para>
+    /// <b>Not</b> the same as <see cref="NpgsqlDataSource.ConnectionString"/> on <see cref="DataSource"/>:
+    /// Npgsql deliberately omits the password from that user-facing property unless the connection
+    /// string sets <c>Persist Security Info=true</c> (it does not here) — reusing it against a
+    /// container that requires SCRAM-SHA-256 password authentication fails with
+    /// "No password has been provided but the backend requires one".
+    /// </para>
+    /// </summary>
+    public string ConnectionString =>
+        _connectionString ?? throw new InvalidOperationException("Fixture not initialized.");
 
     /// <summary>
     /// Produces a fresh, allow-list-valid schema name unique to one test, so migration tests run
@@ -38,7 +53,8 @@ public sealed class PostgresFixture : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         await _container.StartAsync();
-        _dataSource = NpgsqlDataSource.Create(_container.GetConnectionString());
+        _connectionString = _container.GetConnectionString();
+        _dataSource = NpgsqlDataSource.Create(_connectionString);
     }
 
     public async ValueTask DisposeAsync()
