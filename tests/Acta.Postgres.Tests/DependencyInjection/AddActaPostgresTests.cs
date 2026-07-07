@@ -10,6 +10,7 @@ using Acta.Postgres.Configuration;
 using Acta.Postgres.Idempotency;
 using Acta.Postgres.Reservations;
 using Acta.Postgres.Store;
+using Acta.Postgres.Subscriptions;
 using Acta.Postgres.Tests.Infrastructure;
 using Acta.Tests.TestSupport;
 
@@ -40,6 +41,7 @@ public sealed class AddActaPostgresTests(PostgresFixture fixture)
             _fixture.ConnectionString, o => o.SchemaName = PostgresFixture.NewSchemaName()));
 
         provider.GetRequiredService<IEventStore>().Should().BeOfType<PostgresEventStore>();
+        provider.GetRequiredService<ISubscriptionSource>().Should().BeOfType<PostgresSubscriptionSource>();
         provider.GetRequiredService<IReservationStore>().Should().BeOfType<PostgresReservationStore>();
         provider.GetRequiredService<IIdempotencyStore>().Should().BeOfType<PostgresIdempotencyStore>();
     }

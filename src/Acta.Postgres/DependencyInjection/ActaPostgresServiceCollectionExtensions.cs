@@ -4,12 +4,14 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using Acta.Abstractions;
+using Acta.Configuration;
 using Acta.Postgres.Configuration;
 using Acta.Postgres.DependencyInjection;
 using Acta.Postgres.Idempotency;
 using Acta.Postgres.Migrations;
 using Acta.Postgres.Reservations;
 using Acta.Postgres.Store;
+using Acta.Postgres.Subscriptions;
 
 using Npgsql;
 
@@ -157,6 +159,17 @@ public static class ActaPostgresServiceCollectionExtensions
         services.Replace(ServiceDescriptor.Singleton<IEventStore>(sp => new PostgresEventStore(
             sp.GetRequiredService<NpgsqlDataSource>(),
             sp.GetRequiredService<ActaPostgresOptions>(),
+            sp.GetService<TimeProvider>())));
+
+        // Catch-up source swap (task 7.3): the Postgres source carries the safe-HWM VisibilityLag
+        // cutback (04-data §3.2), dormant on the in-memory source. Replace, not TryAdd — override the
+        // in-memory registration unconditionally, mirroring the IEventStore swap. VisibilityLag comes
+        // from the daemon options; the TimeProvider must match the one PostgresEventStore stamps
+        // created_at with (both resolve the same optional container registration).
+        services.Replace(ServiceDescriptor.Singleton<ISubscriptionSource>(sp => new PostgresSubscriptionSource(
+            sp.GetRequiredService<NpgsqlDataSource>(),
+            sp.GetRequiredService<ActaPostgresOptions>(),
+            sp.GetRequiredService<IOptions<ActaOptions>>().Value.Daemon.VisibilityLag,
             sp.GetService<TimeProvider>())));
 
         services.Replace(ServiceDescriptor.Singleton<IReservationStore>(sp => new PostgresReservationStore(
