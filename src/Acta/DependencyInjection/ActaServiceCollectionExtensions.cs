@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Acta.Abstractions;
 using Acta.Aggregates;
 using Acta.Configuration;
+using Acta.Correlation;
 using Acta.InMemory;
 using Acta.Serialization;
 
@@ -11,17 +12,21 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// The Tier 1 composition root for Acta (MODULE-INTERFACES "Rejestracja DI") — registers the
-/// in-memory event store, the event serialization pipeline, the aggregate repository, and a
-/// default <see cref="EventMetadata"/> factory, plus a fail-fast configuration validator run at
-/// host startup.
+/// in-memory event store, the in-memory snapshot store, the event serialization pipeline, the
+/// aggregate repository, and a default <see cref="EventMetadata"/> factory, plus a fail-fast
+/// configuration validator run at host startup.
 /// </summary>
 public static class ActaServiceCollectionExtensions
 {
     /// <summary>
     /// Registers Acta's Tier 1 components into <paramref name="services"/>: an in-memory
-    /// <see cref="IEventStore"/>, an <see cref="EventTypeRegistry"/> and <see cref="EventSerializer"/>
-    /// built from <see cref="ActaOptions"/>, a default <see cref="EventMetadata"/> factory, and the
-    /// open-generic <see cref="IAggregateRepository{TAggregate}"/> implementation.
+    /// <see cref="IEventStore"/>, an in-memory <see cref="ISnapshotStore"/> (task 6.1, FR-4/ADR-006),
+    /// an <see cref="EventTypeRegistry"/> and <see cref="EventSerializer"/> built from
+    /// <see cref="ActaOptions"/>, a default <see cref="EventMetadata"/> factory, and the
+    /// open-generic <see cref="IAggregateRepository{TAggregate}"/> implementation — which MS.DI
+    /// wires to the registered <see cref="ISnapshotStore"/> through that type's optional
+    /// constructor parameter, enabling the snapshot-first read path for any
+    /// <c>TAggregate</c> that also implements <see cref="ISnapshotableAggregate"/>.
     /// <para>
     /// Registration is idempotent (<see cref="ServiceCollectionDescriptorExtensions.TryAdd"/> /
     /// <see cref="ServiceCollectionDescriptorExtensions.TryAddEnumerable"/> throughout, convention
@@ -80,21 +85,42 @@ public static class ActaServiceCollectionExtensions
         // single-process (ADR-014) where the exposure is bounded by process memory.
         services.TryAddSingleton<IEventStore>(sp => new InMemoryEventStore(sp.GetService<TimeProvider>()));
 
-        // Default EventMetadata factory (MODULE-INTERFACES Grupa 3 seam; superseded by a
-        // correlation-accessor-based factory in Grupa 6). Invoked once per SaveAsync call, so a
-        // singleton registration still yields a fresh MessageId per command.
+        // Snapshot store (task 6.1, FR-4/ADR-006) — in-memory, single-process ONLY (D14), same
+        // multi-pod caveat as the event store above. Registered BEFORE the aggregate repository
+        // below so the container can supply it to that open generic's optional constructor
+        // parameter (MS.DI resolves constructor parameters lazily on first request, so
+        // registration order here is documentation, not a hard requirement — kept anyway for
+        // readability: readers see the dependency before its consumer).
+        services.TryAddSingleton<ISnapshotStore>(_ => new InMemorySnapshotStore());
+
+        // Correlation accessor (Grupa 6, FR-9) — singleton, idempotent registration.
+        services.TryAddSingleton<ICorrelationContextAccessor, AsyncLocalCorrelationContextAccessor>();
+
+        // EventMetadata factory — the 3-ID rule read from the correlation accessor (Grupa 6, FR-9;
+        // supersedes the original context-free factory, R-2). Within a correlation scope the stamped
+        // event inherits the scope's CorrelationId/CausationId (and User/TenantId/trace parent+state);
+        // with no scope active the factory stays backwards-compatible with the original root behaviour
+        // — a fresh MessageId with CorrelationId == CausationId == MessageId (each command is the root
+        // of its own conversation). The core never reads Activity.Current — trace fields flow only from
+        // a seeded context (ADR-011 forbidden boundaries, DP-7).
         services.TryAddSingleton<Func<EventMetadata>>(sp =>
         {
             var clock = sp.GetService<TimeProvider>() ?? TimeProvider.System;
+            var accessor = sp.GetRequiredService<ICorrelationContextAccessor>();
             return () =>
             {
-                var id = Guid.NewGuid();
+                var messageId = Guid.NewGuid();
+                var ctx = accessor.Current;
                 return new EventMetadata
                 {
-                    MessageId = id,
-                    CorrelationId = id,
-                    CausationId = id,
+                    MessageId = messageId,
+                    CorrelationId = ctx?.CorrelationId ?? messageId,   // root: no context -> self
+                    CausationId = ctx?.CausationId ?? messageId,       // root: no context -> self
                     Timestamp = clock.GetUtcNow(),
+                    User = ctx?.User,
+                    TenantId = ctx?.TenantId,
+                    TraceParent = ctx?.TraceParent,
+                    TraceState = ctx?.TraceState,
                 };
             };
         });

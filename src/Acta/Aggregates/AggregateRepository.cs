@@ -8,15 +8,17 @@ namespace Acta.Aggregates;
 
 /// <summary>
 /// Core implementation of <see cref="IAggregateRepository{TAggregate}"/>: reads fold a stream's
-/// history into a fresh aggregate (snapshot-first seam reserved for task 6.1/ADR-006 — Tier 1
-/// always reads from the beginning of the stream); writes apply an explicit
-/// optimistic-concurrency guard and stamp each appended event with a deterministic
-/// <c>EventId</c> derived from the current command's metadata, so a retried command dedups into
-/// an idempotent success instead of throwing (D3, ADR-003).
+/// history into a fresh aggregate — consulting an optional <see cref="ISnapshotStore"/> first
+/// (task 6.1, D2/ADR-006) when one is injected AND <typeparamref name="TAggregate"/> implements
+/// <see cref="ISnapshotableAggregate"/>, otherwise always replaying from the beginning of the
+/// stream; writes apply an explicit optimistic-concurrency guard and stamp each appended event with
+/// a deterministic <c>EventId</c> derived from the current command's metadata, so a retried command
+/// dedups into an idempotent success instead of throwing (D3, ADR-003).
 /// <para>
 /// Multi-pod behavior class: safe-by-design — stateless beyond its read-only dependencies
-/// (<see cref="IEventStore"/>, <see cref="EventSerializer"/>, the two injected delegates);
-/// identical behavior on every pod, no shared state and no coordination.
+/// (<see cref="IEventStore"/>, <see cref="EventSerializer"/>, the optional
+/// <see cref="ISnapshotStore"/>, the two injected delegates); identical behavior on every pod, no
+/// shared state and no coordination.
 /// </para>
 /// </summary>
 /// <typeparam name="TAggregate">The concrete aggregate type this repository loads and saves.</typeparam>
@@ -30,6 +32,7 @@ public sealed class AggregateRepository<TAggregate> : IAggregateRepository<TAggr
     private readonly EventSerializer _serializer;
     private readonly Func<EventMetadata> _metadataFactory;
     private readonly Func<EventMetadata, string, int, Guid> _eventIdFactory;
+    private readonly ISnapshotStore? _snapshotStore;
 
     /// <summary>
     /// Creates a repository bound to a store, a serializer, and the command-session seams needed
@@ -52,6 +55,13 @@ public sealed class AggregateRepository<TAggregate> : IAggregateRepository<TAggr
     /// an FNV-1a hash of <c>(metadata.MessageId, streamId, index)</c> — see the remarks on the
     /// default derivation for why a non-cryptographic hash is used deliberately.
     /// </param>
+    /// <param name="snapshotStore">
+    /// Optional snapshot store consulted on every read when <typeparamref name="TAggregate"/> also
+    /// implements <see cref="ISnapshotableAggregate"/> (task 6.1, D2). <see langword="null"/> (the
+    /// default) preserves Tier 1's original full-replay-from-version-0 behavior byte-for-byte — no
+    /// snapshot store injected means no snapshot-first attempt is ever made, regardless of
+    /// <typeparamref name="TAggregate"/>'s shape.
+    /// </param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="store"/>, <paramref name="serializer"/>, or <paramref name="metadataFactory"/> is <see langword="null"/>.
     /// </exception>
@@ -59,7 +69,8 @@ public sealed class AggregateRepository<TAggregate> : IAggregateRepository<TAggr
         IEventStore store,
         EventSerializer serializer,
         Func<EventMetadata> metadataFactory,
-        Func<EventMetadata, string, int, Guid>? eventIdFactory = null)
+        Func<EventMetadata, string, int, Guid>? eventIdFactory = null,
+        ISnapshotStore? snapshotStore = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(serializer);
@@ -69,6 +80,7 @@ public sealed class AggregateRepository<TAggregate> : IAggregateRepository<TAggr
         _serializer = serializer;
         _metadataFactory = metadataFactory;
         _eventIdFactory = eventIdFactory ?? DefaultEventId;
+        _snapshotStore = snapshotStore;
     }
 
     /// <inheritdoc/>
@@ -76,15 +88,8 @@ public sealed class AggregateRepository<TAggregate> : IAggregateRepository<TAggr
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
 
-        var history = await LoadHistoryAsync(id, ct).ConfigureAwait(false);
-        if (history.Count == 0)
-        {
-            return null;
-        }
-
-        var aggregate = new TAggregate();
-        aggregate.LoadFromHistory(history);
-        return aggregate;
+        var (aggregate, existed) = await LoadHistoryAsync(id, ct).ConfigureAwait(false);
+        return existed ? aggregate : null;
     }
 
     /// <inheritdoc/>
@@ -92,13 +97,7 @@ public sealed class AggregateRepository<TAggregate> : IAggregateRepository<TAggr
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
 
-        var history = await LoadHistoryAsync(id, ct).ConfigureAwait(false);
-        var aggregate = new TAggregate();
-        if (history.Count > 0)
-        {
-            aggregate.LoadFromHistory(history);
-        }
-
+        var (aggregate, _) = await LoadHistoryAsync(id, ct).ConfigureAwait(false);
         return new AggregateWriteSession<TAggregate>(aggregate, aggregate.Version, this);
     }
 
@@ -132,27 +131,57 @@ public sealed class AggregateRepository<TAggregate> : IAggregateRepository<TAggr
     }
 
     /// <summary>
-    /// Single-pass materialization loader shared by <see cref="GetByIdAsync"/> and
-    /// <see cref="FetchForWritingAsync"/>: reads the whole stream once, deserializing each event
-    /// as it arrives into a <see cref="List{T}"/>, then lets the caller branch on
-    /// <see cref="List{T}.Count"/> — avoiding a second pass over the underlying
-    /// <see cref="IAsyncEnumerable{T}"/> (which would otherwise deserialize every payload twice).
+    /// Materialization loader shared by <see cref="GetByIdAsync"/> and
+    /// <see cref="FetchForWritingAsync"/>: owns creation of the fresh <typeparamref name="TAggregate"/>
+    /// instance and, when applicable, its snapshot restoration (task 6.1, D2/GAP-1 — this private
+    /// signature intentionally changed from the reserved seam's original "no signature change"
+    /// note, because restoring a snapshot requires an aggregate instance to exist BEFORE the tail
+    /// read below, not after it).
+    /// <para>
+    /// Snapshot-first resolution: when <see cref="_snapshotStore"/> is non-null AND the fresh
+    /// instance implements <see cref="ISnapshotableAggregate"/> (a zero-allocation
+    /// <see langword="is"/> check — task 6.1 decision OQ-1), a compatible snapshot restores the
+    /// aggregate and the tail read starts at <c>snapshot.Version + 1</c>; otherwise (no store, a
+    /// non-snapshotable aggregate, or a rejected/missing snapshot) the tail read starts at version
+    /// 0 — today's full-replay behavior, unchanged.
+    /// </para>
+    /// <para>
+    /// Existence contract (GAP-1): <c>Existed</c> is <see langword="true"/> when EITHER a snapshot
+    /// was restored OR at least one tail event was folded. This matters because a valid snapshot
+    /// with an empty tail (the stream has not moved since the snapshot was taken) must still count
+    /// as "the aggregate exists" — <see cref="GetByIdAsync"/> no longer decides existence purely by
+    /// "did the tail read yield anything", which would incorrectly report null in that case.
+    /// </para>
     /// </summary>
-    private async ValueTask<List<object>> LoadHistoryAsync(string id, CancellationToken ct)
+    private async ValueTask<(TAggregate Aggregate, bool Existed)> LoadHistoryAsync(string id, CancellationToken ct)
     {
-        // Snapshot-first seam (task 6.1/ADR-006): Tier 1 has no snapshot store, so `fromVersion`
-        // is always 0. A future snapshot-aware version resolves `fromVersion` from the loaded
-        // snapshot's version + 1 right here, before the read below, without changing this
-        // method's signature or its callers.
-        const long fromVersion = 0;
+        var aggregate = new TAggregate();
+        var fromVersion = 0L;
+        var restoredFromSnapshot = false;
 
-        var history = new List<object>();
-        await foreach (var stored in _store.ReadStreamAsync(id, fromVersion, toVersion: null, Direction.Forwards, ct).ConfigureAwait(false))
+        if (_snapshotStore is not null && aggregate is ISnapshotableAggregate)
         {
-            history.Add(_serializer.ToSourcedEvent(stored).Event);
+            var snapshot = await _snapshotStore.LoadAsync(id, aggregate.SnapshotSchemaVersion, ct).ConfigureAwait(false);
+            if (snapshot is not null)
+            {
+                aggregate.RestoreFromSnapshot(snapshot.State, snapshot.Version);
+                fromVersion = snapshot.Version + 1;
+                restoredFromSnapshot = true;
+            }
         }
 
-        return history;
+        var tail = new List<object>();
+        await foreach (var stored in _store.ReadStreamAsync(id, fromVersion, toVersion: null, Direction.Forwards, ct).ConfigureAwait(false))
+        {
+            tail.Add(_serializer.ToSourcedEvent(stored).Event);
+        }
+
+        if (tail.Count > 0)
+        {
+            aggregate.LoadFromHistory(tail);
+        }
+
+        return (aggregate, Existed: restoredFromSnapshot || tail.Count > 0);
     }
 
     /// <summary>
