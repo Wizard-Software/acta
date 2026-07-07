@@ -1,3 +1,5 @@
+using System.Diagnostics.Metrics;
+
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,6 +10,7 @@ using Acta.Configuration;
 using Acta.Postgres.Configuration;
 using Acta.Postgres.Coordination;
 using Acta.Postgres.DependencyInjection;
+using Acta.Postgres.Housekeeping;
 using Acta.Postgres.Idempotency;
 using Acta.Postgres.Migrations;
 using Acta.Postgres.Reservations;
@@ -198,6 +201,21 @@ public static class ActaPostgresServiceCollectionExtensions
             sp.GetService<ILogger<MigrationRunner>>()));
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, MigrationHostedService>());
+
+        // Housekeeping (task 7.8, 04-data §3.6, ADR-016): a single-active sweep of the auxiliary tables
+        // (outbox/idempotency/reservations/dead-letter) gated on the {schema}:housekeeping advisory
+        // lock. The metrics owner falls back to new Meter("Acta") when the host registered no
+        // IMeterFactory (mirrors ProjectionDaemonMetrics). The hosted service runs on every pod safely —
+        // the advisory lock guarantees exactly one pod purges per tick.
+        services.TryAddSingleton(sp => new HousekeepingMetrics(sp.GetService<IMeterFactory>()));
+
+        services.TryAddSingleton(sp => new Housekeeper(
+            sp.GetRequiredService<NpgsqlDataSource>(),
+            sp.GetRequiredService<ActaPostgresOptions>(),
+            sp.GetService<HousekeepingMetrics>(),
+            sp.GetService<ILogger<Housekeeper>>()));
+
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, HousekeeperHostedService>());
 
         return services;
     }

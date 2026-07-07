@@ -46,4 +46,13 @@ public sealed class ActaPostgresOptions
     /// </para>
     /// </summary>
     public bool AutoMigrate { get; set; } = true;
+
+    /// <summary>
+    /// Retention and cleanup policy for the auxiliary tables (outbox, idempotency, reservations,
+    /// dead-letter), read by the housekeeping loop (<see cref="Acta.Postgres.Housekeeping.Housekeeper"/>
+    /// driven by <c>HousekeeperHostedService</c>, task 7.8; 04-data §3.6, 03-contracts §2). Defaults are
+    /// an explicit retention policy; a non-positive <see cref="HousekeepingOptions.Interval"/> disables
+    /// the loop and any per-table <see cref="System.TimeSpan.Zero"/> disables that table's purge.
+    /// </summary>
+    public HousekeepingOptions Housekeeping { get; set; } = new();
 }

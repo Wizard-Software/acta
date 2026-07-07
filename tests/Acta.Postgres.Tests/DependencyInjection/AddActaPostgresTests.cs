@@ -111,7 +111,7 @@ public sealed class AddActaPostgresTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public void AddActaPostgres_CalledTwice_RegistersExactlyOneEventStoreAndHostedServiceDescriptor()
+    public void AddActaPostgres_CalledTwice_RegistersOneEventStore_AndNoDuplicateHostedServices()
     {
         var services = new ServiceCollection();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
@@ -122,7 +122,12 @@ public sealed class AddActaPostgresTests(PostgresFixture fixture)
         services.AddActaPostgres(_fixture.ConnectionString, o => o.SchemaName = schema);
 
         services.Should().ContainSingle(d => d.ServiceType == typeof(IEventStore));
-        services.Should().ContainSingle(d => d.ServiceType == typeof(IHostedService));
+
+        // Two distinct hosted services (migration + housekeeping, task 7.8); calling AddActaPostgres
+        // twice must not duplicate either (TryAddEnumerable de-dupes by implementation type).
+        var hostedServices = services.Where(d => d.ServiceType == typeof(IHostedService)).ToList();
+        hostedServices.Should().HaveCount(2);
+        hostedServices.Select(d => d.ImplementationType).Should().OnlyHaveUniqueItems();
 
         using var provider = services.BuildServiceProvider();
         provider.GetRequiredService<IEventStore>().Should().BeOfType<PostgresEventStore>();
