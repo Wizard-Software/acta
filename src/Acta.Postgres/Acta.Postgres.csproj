@@ -5,4 +5,29 @@
     <ProjectReference Include="..\Acta\Acta.csproj" />
   </ItemGroup>
 
+  <!-- Pure Npgsql data access (ADR-004 — no ORM). Logging.Abstractions carries the optional
+       ILogger the MigrationRunner writes migration-applied/-skipped diagnostics to. -->
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <!-- Versioned migrations shipped as embedded SQL (04-data §4); the MigrationRunner discovers
+       them from the assembly manifest by the .Migrations.Sql. marker + NNNN_ filename prefix. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Migrations/Sql/*.sql" />
+  </ItemGroup>
+
+  <!-- Least-privilege DB role model (04-data §4.1, task 7.9) — an operational artifact for the
+       DBA/CD pipeline, shipped alongside the package (not embedded, never read by MigrationRunner). -->
+  <ItemGroup>
+    <None Include="Roles\acta-least-privilege-roles.sql" Pack="true" PackagePath="roles\" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- OQ-1 (task 7.1): the test project uses the internal ctor taking an explicit migration list
+       to exercise transactional-DDL rollback without shipping a broken migration in production. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Acta.Postgres.Tests" />
+  </ItemGroup>
+
 </Project>

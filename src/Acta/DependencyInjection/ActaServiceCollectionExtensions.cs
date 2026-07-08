@@ -93,6 +93,11 @@ public static class ActaServiceCollectionExtensions
         // readability: readers see the dependency before its consumer).
         services.TryAddSingleton<ISnapshotStore>(_ => new InMemorySnapshotStore());
 
+        // Leader elector (task 7.5, ADR-005) — in-memory default: single-process, single-active per
+        // (projection, tenant), no cross-pod election (ADR-014, D14). AddActaPostgres replaces this
+        // with the advisory-lock elector. TryAdd — additive and idempotent.
+        services.TryAddSingleton<ILeaderElector, InMemoryLeaderElector>();
+
         // Correlation accessor (Grupa 6, FR-9) — singleton, idempotent registration.
         services.TryAddSingleton<ICorrelationContextAccessor, AsyncLocalCorrelationContextAccessor>();
 

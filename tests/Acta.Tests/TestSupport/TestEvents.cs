@@ -51,8 +51,13 @@ public static class TestEvents
         return [.. Enumerable.Range(0, count).Select(_ => Create(eventType, eventId: null))];
     }
 
+    // Payload is a well-formed JSON array ("[1,2,3]") rather than the raw bytes { 1, 2, 3 }: the
+    // Postgres backend stores payloads in a jsonb NOT NULL column (frozen migration 0001), so the
+    // shared contract suite can only run against real PostgreSQL when TestEvents emits valid JSON
+    // (FR-10 — payloads are System.Text.Json). No test asserts the payload bytes, so this is a
+    // backward-compatible fixture alignment, not a behavioral change.
     private static EventData Create(string eventType, Guid? eventId) =>
-        new(eventId ?? Guid.NewGuid(), eventType, SchemaVersion: 1, new byte[] { 1, 2, 3 }, CreateMetadata());
+        new(eventId ?? Guid.NewGuid(), eventType, SchemaVersion: 1, "[1,2,3]"u8.ToArray(), CreateMetadata());
 
     private static EventMetadata CreateMetadata() => new()
     {

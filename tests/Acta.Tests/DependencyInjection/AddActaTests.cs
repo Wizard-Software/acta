@@ -231,6 +231,38 @@ public sealed class AddActaTests
     }
 
     [Fact]
+    public void AddActa_Default_RegistersResolvableInMemoryLeaderElector()
+    {
+        using var provider = BuildProvider();
+
+        var elector = provider.GetRequiredService<ILeaderElector>();
+
+        elector.Should().BeOfType<InMemoryLeaderElector>();
+    }
+
+    [Fact]
+    public void AddActa_TwoResolves_ReturnSameLeaderElectorSingletonInstance()
+    {
+        using var provider = BuildProvider();
+
+        var first = provider.GetRequiredService<ILeaderElector>();
+        var second = provider.GetRequiredService<ILeaderElector>();
+
+        second.Should().BeSameAs(first);
+    }
+
+    [Fact]
+    public void AddActa_CalledTwice_RegistersExactlyOneLeaderElectorServiceDescriptor()
+    {
+        var services = new ServiceCollection();
+
+        services.AddActa();
+        services.AddActa();
+
+        services.Should().ContainSingle(d => d.ServiceType == typeof(ILeaderElector));
+    }
+
+    [Fact]
     public void MetadataFactory_WithinCorrelationScope_InheritsCorrelationAndCausation()
     {
         using var provider = BuildProvider();
