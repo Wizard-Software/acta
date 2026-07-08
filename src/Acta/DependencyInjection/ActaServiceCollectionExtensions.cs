@@ -85,6 +85,12 @@ public static class ActaServiceCollectionExtensions
         // single-process (ADR-014) where the exposure is bounded by process memory.
         services.TryAddSingleton<IEventStore>(sp => new InMemoryEventStore(sp.GetService<TimeProvider>()));
 
+        // Reservation store (task 8.5, FR-16/ADR-009) and idempotency store (task 8.5, FR-7/ADR-003)
+        // — in-memory, best-effort, single-process ONLY (D14), same multi-pod caveat as the event
+        // store above. AddActaPostgres replaces both with the durable, database-enforced backends.
+        services.TryAddSingleton<IReservationStore>(sp => new InMemoryReservationStore(sp.GetService<TimeProvider>()));
+        services.TryAddSingleton<IIdempotencyStore>(sp => new InMemoryIdempotencyStore(sp.GetService<TimeProvider>()));
+
         // Snapshot store (task 6.1, FR-4/ADR-006) — in-memory, single-process ONLY (D14), same
         // multi-pod caveat as the event store above. Registered BEFORE the aggregate repository
         // below so the container can supply it to that open generic's optional constructor

@@ -378,6 +378,70 @@ public sealed class AddActaTests
         loaded!.Value.Should().Be(99);
     }
 
+    [Fact]
+    public void AddActa_Default_RegistersResolvableInMemoryReservationStore()
+    {
+        using var provider = BuildProvider();
+
+        var store = provider.GetRequiredService<IReservationStore>();
+
+        store.Should().BeOfType<InMemoryReservationStore>();
+    }
+
+    [Fact]
+    public void AddActa_TwoResolves_ReturnSameReservationStoreSingletonInstance()
+    {
+        using var provider = BuildProvider();
+
+        var first = provider.GetRequiredService<IReservationStore>();
+        var second = provider.GetRequiredService<IReservationStore>();
+
+        second.Should().BeSameAs(first);
+    }
+
+    [Fact]
+    public void AddActa_CalledTwice_RegistersExactlyOneReservationStoreServiceDescriptor()
+    {
+        var services = new ServiceCollection();
+
+        services.AddActa();
+        services.AddActa();
+
+        services.Should().ContainSingle(d => d.ServiceType == typeof(IReservationStore));
+    }
+
+    [Fact]
+    public void AddActa_Default_RegistersResolvableInMemoryIdempotencyStore()
+    {
+        using var provider = BuildProvider();
+
+        var store = provider.GetRequiredService<IIdempotencyStore>();
+
+        store.Should().BeOfType<InMemoryIdempotencyStore>();
+    }
+
+    [Fact]
+    public void AddActa_TwoResolves_ReturnSameIdempotencyStoreSingletonInstance()
+    {
+        using var provider = BuildProvider();
+
+        var first = provider.GetRequiredService<IIdempotencyStore>();
+        var second = provider.GetRequiredService<IIdempotencyStore>();
+
+        second.Should().BeSameAs(first);
+    }
+
+    [Fact]
+    public void AddActa_CalledTwice_RegistersExactlyOneIdempotencyStoreServiceDescriptor()
+    {
+        var services = new ServiceCollection();
+
+        services.AddActa();
+        services.AddActa();
+
+        services.Should().ContainSingle(d => d.ServiceType == typeof(IIdempotencyStore));
+    }
+
     private readonly record struct PlantedState(int Value);
 
     private sealed class FixedTimeProvider(DateTimeOffset instant) : TimeProvider
