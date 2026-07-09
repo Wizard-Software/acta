@@ -1,4 +1,9 @@
+using System.Diagnostics;
+
+using Microsoft.Extensions.Logging;
+
 using Acta.Abstractions;
+using Acta.Diagnostics;
 
 namespace Acta.InMemory;
 
@@ -15,7 +20,11 @@ namespace Acta.InMemory;
 /// </para>
 /// </summary>
 /// <param name="collector">The collector drained on every <see cref="FlushAsync"/> call.</param>
-public sealed class InMemoryOutboxFlush(IIntegrationEventCollector collector) : IOutboxFlush
+/// <param name="logger">
+/// Emits a structured, payload-free log entry each time a flush enlists drained events (task 8.6,
+/// decision D-4); <see langword="null"/> (the default) disables logging — additive, null-safe.
+/// </param>
+public sealed class InMemoryOutboxFlush(IIntegrationEventCollector collector, ILogger<InMemoryOutboxFlush>? logger = null) : IOutboxFlush
 {
     /// <inheritdoc/>
     /// <exception cref="InvalidOperationException">
@@ -32,7 +41,14 @@ public sealed class InMemoryOutboxFlush(IIntegrationEventCollector collector) : 
                 $"InMemoryOutboxFlush requires an InMemoryEventAppendTransaction, but received {tx.GetType().Name}.");
         }
 
-        inMemoryTx.EnlistOutbox(collector.Drain());
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.OutboxFlushSpan, ActivityKind.Internal);
+
+        var drained = collector.Drain();
+        inMemoryTx.EnlistOutbox(drained);
+
+        activity?.SetTag(ActaDiagnostics.EventCountTag, drained.Count);
+        logger?.OutboxFlushed(drained.Count);
+
         return ValueTask.CompletedTask;
     }
 }

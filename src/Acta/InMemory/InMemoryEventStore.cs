@@ -1,7 +1,11 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
+using Microsoft.Extensions.Logging;
+
 using Acta.Abstractions;
+using Acta.Diagnostics;
 
 namespace Acta.InMemory;
 
@@ -92,9 +96,24 @@ namespace Acta.InMemory;
 /// for deterministic tests. <see langword="null"/> (the default) resolves to
 /// <see cref="TimeProvider.System"/>.
 /// </param>
-public sealed class InMemoryEventStore(TimeProvider? timeProvider = null) : IEventStore
+/// <param name="metrics">
+/// Records <c>acta.append.throughput</c> for every <see cref="AppendAsync"/> call (task 8.6);
+/// <see langword="null"/> (the default) disables the recording — additive, null-safe.
+/// </param>
+/// <param name="logger">
+/// Emits structured, payload-free append/read log entries (task 8.6, decision D-4);
+/// <see langword="null"/> (the default) disables logging — additive, null-safe.
+/// </param>
+public sealed class InMemoryEventStore(
+    TimeProvider? timeProvider = null,
+    EventStoreMetrics? metrics = null,
+    ILogger<InMemoryEventStore>? logger = null) : IEventStore
 {
+    private const string Backend = "inmemory";
+
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly EventStoreMetrics? _metrics = metrics;
+    private readonly ILogger<InMemoryEventStore>? _logger = logger;
     private readonly Lock _writeLock = new();
     private State _state = State.Empty;
 
@@ -109,6 +128,14 @@ public sealed class InMemoryEventStore(TimeProvider? timeProvider = null) : IEve
         ArgumentNullException.ThrowIfNull(events);
         ct.ThrowIfCancellationRequested();
 
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.AppendSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.StreamIdTag, streamId);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
+        // PERF-3: the result (in particular the GlobalPosition, only known once the lock has decided
+        // the no-op/dedup/genuine-append branch) is captured HERE, inside the lock; every
+        // instrumentation call below runs AFTER the lock is released, never inside the critical section.
+        AppendResult result;
         lock (_writeLock)
         {
             var state = Volatile.Read(ref _state);
@@ -121,46 +148,54 @@ public sealed class InMemoryEventStore(TimeProvider? timeProvider = null) : IEve
             // stream's current head unchanged.
             if (events.Count == 0)
             {
-                return ValueTask.FromResult(new AppendResult(currentLastVersion, currentHeadPosition, Deduplicated: false));
+                result = new AppendResult(currentLastVersion, currentHeadPosition, Deduplicated: false);
             }
-
             // ADR-003 / GAP-1: a full-batch replay is recognized BEFORE the concurrency guard —
             // see the class remarks for the exact in-memory default and its cross-backend caveat.
-            if (HasAnyDuplicateKey(state.Dedup, streamId, events))
+            else if (HasAnyDuplicateKey(state.Dedup, streamId, events))
             {
-                return ValueTask.FromResult(new AppendResult(currentLastVersion, currentHeadPosition, Deduplicated: true));
+                result = new AppendResult(currentLastVersion, currentHeadPosition, Deduplicated: true);
             }
-
-            ValidateExpectedVersion(streamId, expectedVersion, currentLastVersion);
-
-            var timestamp = _timeProvider.GetUtcNow();
-            var appended = new StoredEvent[events.Count];
-            for (var i = 0; i < events.Count; i++)
+            else
             {
-                var eventData = events[i];
-                appended[i] = new StoredEvent(
-                    eventData.EventId,
-                    streamId,
-                    currentLastVersion + 1 + i,
-                    new GlobalPosition(state.NextGlobalPosition + i),
-                    eventData.EventType,
-                    eventData.SchemaVersion,
-                    eventData.Payload,
-                    eventData.Metadata,
-                    timestamp);
+                ValidateExpectedVersion(streamId, expectedVersion, currentLastVersion);
+
+                var timestamp = _timeProvider.GetUtcNow();
+                var appended = new StoredEvent[events.Count];
+                for (var i = 0; i < events.Count; i++)
+                {
+                    var eventData = events[i];
+                    appended[i] = new StoredEvent(
+                        eventData.EventId,
+                        streamId,
+                        currentLastVersion + 1 + i,
+                        new GlobalPosition(state.NextGlobalPosition + i),
+                        eventData.EventType,
+                        eventData.SchemaVersion,
+                        eventData.Payload,
+                        eventData.Metadata,
+                        timestamp);
+                }
+
+                var updatedGlobal = state.Global.AddRange(appended);
+                var updatedStreamEvents = (streamEvents ?? ImmutableList<StoredEvent>.Empty).AddRange(appended);
+                var updatedByStream = state.ByStream.SetItem(streamId, updatedStreamEvents);
+                var updatedDedup = state.Dedup.Union(appended.Select(e => new StreamEventKey(streamId, e.EventId)));
+                var newState = new State(updatedGlobal, updatedByStream, updatedDedup, state.NextGlobalPosition + appended.Length);
+
+                Volatile.Write(ref _state, newState);
+
+                var last = appended[^1];
+                result = new AppendResult(last.Version, last.GlobalPosition, Deduplicated: false);
             }
-
-            var updatedGlobal = state.Global.AddRange(appended);
-            var updatedStreamEvents = (streamEvents ?? ImmutableList<StoredEvent>.Empty).AddRange(appended);
-            var updatedByStream = state.ByStream.SetItem(streamId, updatedStreamEvents);
-            var updatedDedup = state.Dedup.Union(appended.Select(e => new StreamEventKey(streamId, e.EventId)));
-            var newState = new State(updatedGlobal, updatedByStream, updatedDedup, state.NextGlobalPosition + appended.Length);
-
-            Volatile.Write(ref _state, newState);
-
-            var last = appended[^1];
-            return ValueTask.FromResult(new AppendResult(last.Version, last.GlobalPosition, Deduplicated: false));
         }
+
+        // Instrumentation AFTER the lock (PERF-3) — never inside the critical section.
+        activity?.SetTag(ActaDiagnostics.EventCountTag, events.Count);
+        _metrics?.RecordAppend(events.Count, Backend);
+        _logger?.AppendCommitted(streamId, events.Count, result.LastGlobalPosition.Value, Backend);
+
+        return ValueTask.FromResult(result);
     }
 
     /// <inheritdoc/>
@@ -184,6 +219,12 @@ public sealed class InMemoryEventStore(TimeProvider? timeProvider = null) : IEve
         Direction direction = Direction.Forwards,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        // GAP-6: the Activity is started HERE, inside the async-iterator body, so the span covers the
+        // whole enumeration (a using inside a non-iterator wrapper would close it before enumeration
+        // even starts). No per-event SetTag in the loop below — only once, after it completes.
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.ReadSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
         // No real asynchronous work happens below — this backend is fully synchronous
         // process-local memory (ADR-014) — but a genuine async-iterator method needs one await
         // to avoid CS1998; it also gives future backends a drop-in-compatible signature.
@@ -195,11 +236,16 @@ public sealed class InMemoryEventStore(TimeProvider? timeProvider = null) : IEve
         var ordered = OrderForRead(filtered, direction);
         var limited = maxCount is { } limit ? ordered.Take(limit) : ordered;
 
+        var count = 0;
         foreach (var storedEvent in limited)
         {
             ct.ThrowIfCancellationRequested();
+            count++;
             yield return storedEvent;
         }
+
+        activity?.SetTag(ActaDiagnostics.EventCountTag, count);
+        _logger?.ReadCompleted(count, Backend, streamId: null);
     }
 
     private async IAsyncEnumerable<StoredEvent> ReadStreamCoreAsync(
@@ -209,22 +255,31 @@ public sealed class InMemoryEventStore(TimeProvider? timeProvider = null) : IEve
         Direction direction,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        // GAP-6: started inside this async-iterator body (not the ReadStreamAsync wrapper) so the span
+        // covers the whole enumeration. No per-event SetTag in the loop below.
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.ReadSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.StreamIdTag, streamId);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
         await Task.CompletedTask; // See the remark in ReadAllAsync — silences CS1998 by design.
         ct.ThrowIfCancellationRequested();
 
         var state = Volatile.Read(ref _state);
-        if (!state.ByStream.TryGetValue(streamId, out var streamEvents))
+        var count = 0;
+        if (state.ByStream.TryGetValue(streamId, out var streamEvents))
         {
-            yield break;
+            var filtered = streamEvents.Where(e => e.Version >= fromVersion && (toVersion is null || e.Version <= toVersion.Value));
+
+            foreach (var storedEvent in OrderForRead(filtered, direction))
+            {
+                ct.ThrowIfCancellationRequested();
+                count++;
+                yield return storedEvent;
+            }
         }
 
-        var filtered = streamEvents.Where(e => e.Version >= fromVersion && (toVersion is null || e.Version <= toVersion.Value));
-
-        foreach (var storedEvent in OrderForRead(filtered, direction))
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return storedEvent;
-        }
+        activity?.SetTag(ActaDiagnostics.EventCountTag, count);
+        _logger?.ReadCompleted(count, Backend, streamId);
     }
 
     private static IEnumerable<StoredEvent> OrderForRead(IEnumerable<StoredEvent> events, Direction direction)

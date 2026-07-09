@@ -1,9 +1,13 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 
+using Microsoft.Extensions.Logging;
+
 using Acta.Abstractions;
+using Acta.Diagnostics;
 using Acta.Postgres.Configuration;
 
 using Npgsql;
@@ -73,12 +77,15 @@ public sealed class PostgresEventStore : IEventStore
 {
     private const string UqStreamVersion = "uq_events_stream_version";
     private const string UqStreamEventId = "uq_events_stream_eventid";
+    private const string Backend = "postgres";
 
     private static readonly JsonSerializerOptions MetadataOptions = new(JsonSerializerDefaults.Web);
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly string _schema;
     private readonly TimeProvider _timeProvider;
+    private readonly EventStoreMetrics? _metrics;
+    private readonly ILogger<PostgresEventStore>? _logger;
 
     /// <summary>
     /// Creates a store over <paramref name="dataSource"/>, persisting into
@@ -91,8 +98,21 @@ public sealed class PostgresEventStore : IEventStore
     /// Clock used to stamp <c>created_at</c> on appended events, injectable for deterministic tests.
     /// <see langword="null"/> (the default) resolves to <see cref="TimeProvider.System"/>.
     /// </param>
+    /// <param name="metrics">
+    /// Records <c>acta.append.throughput</c> for every <see cref="AppendAsync"/> call (task 8.6);
+    /// <see langword="null"/> (the default) disables the recording — additive, null-safe.
+    /// </param>
+    /// <param name="logger">
+    /// Emits structured, payload-free append/read log entries (task 8.6, decision D-4);
+    /// <see langword="null"/> (the default) disables logging — additive, null-safe.
+    /// </param>
     /// <exception cref="ArgumentException">The configured schema name is outside the allow-list.</exception>
-    public PostgresEventStore(NpgsqlDataSource dataSource, ActaPostgresOptions options, TimeProvider? timeProvider = null)
+    public PostgresEventStore(
+        NpgsqlDataSource dataSource,
+        ActaPostgresOptions options,
+        TimeProvider? timeProvider = null,
+        EventStoreMetrics? metrics = null,
+        ILogger<PostgresEventStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(options);
@@ -100,6 +120,8 @@ public sealed class PostgresEventStore : IEventStore
         _dataSource = dataSource;
         _schema = SchemaName.Validate(options.SchemaName);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _metrics = metrics;
+        _logger = logger;
     }
 
     /// <inheritdoc/>
@@ -113,9 +135,14 @@ public sealed class PostgresEventStore : IEventStore
         ArgumentNullException.ThrowIfNull(events);
         ct.ThrowIfCancellationRequested();
 
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.AppendSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.StreamIdTag, streamId);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
+        AppendResult result;
         try
         {
-            return await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
+            result = await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
         {
@@ -124,8 +151,14 @@ public sealed class PostgresEventStore : IEventStore
             // stream row exists — re-run once: the retry's FOR UPDATE serializes on that row and the
             // dedup-before-guard path resolves the outcome (Deduplicated / ConcurrencyException /
             // genuine append) with no possibility of a further 23505 for this stream.
-            return await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
+            result = await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
         }
+
+        activity?.SetTag(ActaDiagnostics.EventCountTag, events.Count);
+        _metrics?.RecordAppend(events.Count, Backend);
+        _logger?.AppendCommitted(streamId, events.Count, result.LastGlobalPosition.Value, Backend);
+
+        return result;
     }
 
     private async Task<AppendResult> AppendCoreAsync(
@@ -227,6 +260,12 @@ public sealed class PostgresEventStore : IEventStore
         Direction direction,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        // GAP-6: the Activity is started HERE, inside the async-iterator body, so the span covers the
+        // whole enumeration. No per-event SetTag in the loop below — only once, after it completes.
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.ReadSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.StreamIdTag, streamId);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
         var sql =
             $"""
              SELECT event_id, stream_id, version, global_position, event_type, schema_version, payload, metadata, created_at
@@ -241,11 +280,16 @@ public sealed class PostgresEventStore : IEventStore
         command.Parameters.AddWithValue("from", fromVersion);
         command.Parameters.Add(new NpgsqlParameter("to", NpgsqlDbType.Bigint) { Value = (object?)toVersion ?? DBNull.Value });
 
+        var count = 0;
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            count++;
             yield return MapEvent(reader);
         }
+
+        activity?.SetTag(ActaDiagnostics.EventCountTag, count);
+        _logger?.ReadCompleted(count, Backend, streamId);
     }
 
     private async IAsyncEnumerable<StoredEvent> ReadAllCoreAsync(
@@ -255,6 +299,10 @@ public sealed class PostgresEventStore : IEventStore
         Direction direction,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        // GAP-6: started inside this async-iterator body so the span covers the whole enumeration.
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.ReadSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
         var limitClause = maxCount is null ? string.Empty : "\nLIMIT @maxCount";
         var sql =
             $"""
@@ -273,11 +321,16 @@ public sealed class PostgresEventStore : IEventStore
             command.Parameters.AddWithValue("maxCount", limit);
         }
 
+        var count = 0;
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            count++;
             yield return MapEvent(reader);
         }
+
+        activity?.SetTag(ActaDiagnostics.EventCountTag, count);
+        _logger?.ReadCompleted(count, Backend, streamId: null);
     }
 
     private async Task<(long CurrentLastVersion, bool RowExists)> ReadStreamHeadAsync(

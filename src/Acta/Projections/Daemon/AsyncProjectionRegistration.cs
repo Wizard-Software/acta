@@ -105,6 +105,43 @@ public sealed class AsyncProjectionRegistration
     /// </summary>
     internal DateTimeOffset? GapObservedAt { get; private set; }
 
+    private long _hwmSnapshot;
+    private long _checkpointSnapshot;
+
+    /// <summary>
+    /// The most recently published safe high-water mark (task 8.6, decision D-1), read via
+    /// <see cref="Volatile.Read{T}(ref T)"/> — consumed exclusively by the
+    /// <c>ProjectionDaemonMetrics.acta.projection.lag</c> gauge callback on the metrics collector
+    /// thread. Zero until <see cref="PublishLagSnapshot"/> is first called.
+    /// </summary>
+    internal long HwmSnapshot => Volatile.Read(ref _hwmSnapshot);
+
+    /// <summary>
+    /// The most recently published checkpoint (task 8.6, decision D-1), read via
+    /// <see cref="Volatile.Read{T}(ref T)"/> — consumed exclusively by the
+    /// <c>ProjectionDaemonMetrics.acta.projection.lag</c> gauge callback on the metrics collector
+    /// thread. Zero until <see cref="PublishLagSnapshot"/> is first called.
+    /// </summary>
+    internal long CheckpointSnapshot => Volatile.Read(ref _checkpointSnapshot);
+
+    /// <summary>
+    /// Publishes a lock-free snapshot of the safe high-water mark and this projection's checkpoint
+    /// (task 8.6, decision D-1), consumed exclusively by the <c>acta.projection.lag</c> gauge
+    /// callback. Called once per daemon tick from <see cref="ProjectionDaemon.RunProjectionTickAsync"/>
+    /// — the daemon's single background thread — via <see cref="Volatile.Write{T}(ref T, T)"/>; the
+    /// metrics collector thread only ever reads the two fields back through <see cref="HwmSnapshot"/>/
+    /// <see cref="CheckpointSnapshot"/>, never <see cref="CachedCheckpoint"/> or the daemon's
+    /// <c>HwmPoller</c> directly (that would be sync-over-async / a cross-thread data race,
+    /// GAP-1/PERF-1).
+    /// </summary>
+    /// <param name="hwm">The safe high-water mark read once per tick and shared across every projection (<see cref="GlobalPosition.Value"/>).</param>
+    /// <param name="checkpoint">This projection's checkpoint as known at the start of this tick (<see cref="GlobalPosition.Value"/>).</param>
+    internal void PublishLagSnapshot(long hwm, long checkpoint)
+    {
+        Volatile.Write(ref _hwmSnapshot, hwm);
+        Volatile.Write(ref _checkpointSnapshot, checkpoint);
+    }
+
     /// <summary>Marks this projection faulted so the daemon stops leading it (baseline halt, 5.2).</summary>
     internal void Halt() => IsHalted = true;
 

@@ -1,10 +1,12 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using Acta.Abstractions;
 using Acta.Aggregates;
 using Acta.Configuration;
 using Acta.Correlation;
+using Acta.Diagnostics;
 using Acta.InMemory;
 using Acta.Serialization;
 
@@ -77,13 +79,25 @@ public static class ActaServiceCollectionExtensions
             return new EventSerializer(options.Events, options.SerializerOptions);
         });
 
+        // Diagnostics (task 8.6, D3 pattern — falls back to new Meter("Acta") when the host never
+        // called AddMetrics()). Registered here — not in AsyncProjectionServiceCollectionExtensions
+        // (GAP-2) — because InMemoryEventStore itself is registered by THIS method, and any host that
+        // never calls AddActaAsyncProjection (or calls AddActaPostgres instead) must still get
+        // acta.append.throughput instrumentation. SubscriptionMetrics is reserved (D-5, wired in R3)
+        // but registered alongside so it is resolvable the same way.
+        services.TryAddSingleton<EventStoreMetrics>();
+        services.TryAddSingleton<SubscriptionMetrics>();
+
         // In-memory backend (single-process ONLY — D14). TimeProvider comes from the container
         // when the host registered one; InMemoryEventStore falls back to TimeProvider.System.
         // SEC-1 (plan Q2): ActaOptions.MaxEventPayloadSize/MaxAppendBatchSize do not exist yet —
         // enforcing them belongs to the append path (InMemoryEventStore.AppendAsync), not to this
         // composition root. Deferred to a Feature 7 task; acceptable for Tier 1 in-memory,
         // single-process (ADR-014) where the exposure is bounded by process memory.
-        services.TryAddSingleton<IEventStore>(sp => new InMemoryEventStore(sp.GetService<TimeProvider>()));
+        services.TryAddSingleton<IEventStore>(sp => new InMemoryEventStore(
+            sp.GetService<TimeProvider>(),
+            sp.GetService<EventStoreMetrics>(),
+            sp.GetService<ILogger<InMemoryEventStore>>()));
 
         // Reservation store (task 8.5, FR-16/ADR-009) and idempotency store (task 8.5, FR-7/ADR-003)
         // — in-memory, best-effort, single-process ONLY (D14), same multi-pod caveat as the event
