@@ -1,7 +1,11 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Reflection;
 
+using Microsoft.Extensions.Logging;
+
 using Acta.Abstractions;
+using Acta.Diagnostics;
 using Acta.Serialization;
 
 namespace Acta.Projections.Inline;
@@ -77,6 +81,7 @@ public sealed class InlineProjectionRunner
     private readonly ConcurrentDictionary<Type, DispatchEntry[]> _matchCache = new();
     private readonly Dictionary<object, GlobalPosition> _watermarks = [];
     private readonly Lock _watermarkLock = new();
+    private readonly ILogger<InlineProjectionRunner>? _logger;
 
     /// <summary>
     /// Creates a runner bound to a serializer, a registry, and the set of projections to dispatch
@@ -93,10 +98,18 @@ public sealed class InlineProjectionRunner
     /// <see cref="IProjection{TEvent}"/>), typically supplied by DI as an <c>IEnumerable&lt;object&gt;</c>
     /// (see <c>AddInlineProjection</c>).
     /// </param>
+    /// <param name="logger">
+    /// Emits a structured, payload-free log entry each time a projection applies an event (task 8.6,
+    /// decision D-4); <see langword="null"/> (the default) disables logging — additive, null-safe.
+    /// </param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="serializer"/>, <paramref name="registry"/>, or <paramref name="projections"/> is <see langword="null"/>.
     /// </exception>
-    public InlineProjectionRunner(EventSerializer serializer, EventTypeRegistry registry, IEnumerable<object> projections)
+    public InlineProjectionRunner(
+        EventSerializer serializer,
+        EventTypeRegistry registry,
+        IEnumerable<object> projections,
+        ILogger<InlineProjectionRunner>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(registry);
@@ -105,6 +118,7 @@ public sealed class InlineProjectionRunner
         _serializer = serializer;
         _registry = registry;
         _byEventType = BuildDispatchMap(projections);
+        _logger = logger;
     }
 
     /// <summary>
@@ -171,9 +185,15 @@ public sealed class InlineProjectionRunner
                     continue;
                 }
 
+                var projectionName = entry.Projection.GetType().Name;
+
+                using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.ProjectionApplySpan, ActivityKind.Internal);
+                activity?.SetTag(ActaDiagnostics.ProjectionNameTag, projectionName);
+
                 await entry.Apply(sourced.Event, stored, ct).ConfigureAwait(false);
 
                 MarkApplied(entry.Projection, stored.GlobalPosition);
+                _logger?.ProjectionApplied(projectionName, stored.GlobalPosition.Value);
             }
         }
     }

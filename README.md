@@ -58,6 +58,34 @@ push protection. Supply-chain integrity is enforced from the first commit via a
 pinned NuGet source and a committed `packages.lock.json` lock file
 (`RestoreLockedMode` in CI).
 
+### Mutation testing
+
+```bash
+dotnet tool restore
+
+# What CI runs. On a PR the >=80% threshold applies to changed code only.
+dotnet stryker
+dotnet stryker --since:origin/main
+
+# Local, with per-test coverage analysis: reports NoCoverage separately from
+# Survived, so you can see which code no test touches at all.
+dotnet stryker -f stryker-config.coverage.json
+```
+
+`stryker-config.json` sets `"coverage-analysis": "off"`, which makes Stryker run
+the whole test suite against every mutant instead of trusting its per-test
+coverage map. This is the stricter setting, not the looser one: a mutant that no
+test kills is still reported as `Survived` and still counts against the 80%
+threshold. It is required because Stryker 4.15.0's per-test coverage capture
+returns a near-empty map under `--since` on the MTP runner (which xUnit v3
+requires), marking mutants `NoCoverage` that the suite demonstrably kills — a
+combination that pins the diff-scoped score near 8% regardless of test quality.
+The suite runs in well under a second, so the cost of `off` is a few minutes.
+
+Use `stryker-config.coverage.json` when you want the `NoCoverage` vs `Survived`
+distinction back — it is the only thing `off` gives up. Run it without `--since`;
+per-test coverage capture is reliable on a full run.
+
 ## License
 
 [MIT](LICENSE) © 2026 Wizard Software (Artur Sawicki)

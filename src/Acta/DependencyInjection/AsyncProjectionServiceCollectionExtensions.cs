@@ -107,7 +107,8 @@ public static class AsyncProjectionServiceCollectionExtensions
                 new InlineProjectionRunner(
                     sp.GetRequiredService<EventSerializer>(),
                     sp.GetRequiredService<EventTypeRegistry>(),
-                    [sp.GetRequiredService<TProjection>()]),
+                    [sp.GetRequiredService<TProjection>()],
+                    sp.GetService<ILogger<InlineProjectionRunner>>()),
                 errorPolicy));
         }
 

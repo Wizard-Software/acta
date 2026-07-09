@@ -15,8 +15,16 @@
 
   <ItemGroup>
     <!-- Expose internals to the unit test project so ProjectionDaemon.RunTickAsync (internal) can
-         be driven deterministically without a background thread or a real clock (task 5.2, D9). -->
+         be driven deterministically without a background thread or a real clock (task 5.2, D9).
+         Acta.Postgres also needs friend access (task 8.6, decision D-2): the shared diagnostics
+         primitives in Acta.Diagnostics (ActaDiagnostics span/tag constants, EventStoreMetrics's
+         internal RecordAppend, ActaLogMessages) are deliberately internal, not public — PostgresEventStore
+         threads the exact same constants/methods as InMemoryEventStore, so the adapter assembly is
+         granted friend access too. Acta.Postgres.Tests gets the same grant so its telemetry tests can
+         assert on those internal constants directly, mirroring Acta.Tests. -->
     <InternalsVisibleTo Include="Acta.Tests" />
+    <InternalsVisibleTo Include="Acta.Postgres" />
+    <InternalsVisibleTo Include="Acta.Postgres.Tests" />
   </ItemGroup>
 
 </Project>

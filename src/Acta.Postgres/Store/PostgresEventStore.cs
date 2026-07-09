@@ -1,9 +1,13 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 
+using Microsoft.Extensions.Logging;
+
 using Acta.Abstractions;
+using Acta.Diagnostics;
 using Acta.Postgres.Configuration;
 
 using Npgsql;
@@ -73,12 +77,15 @@ public sealed class PostgresEventStore : IEventStore
 {
     private const string UqStreamVersion = "uq_events_stream_version";
     private const string UqStreamEventId = "uq_events_stream_eventid";
+    private const string Backend = "postgres";
 
     private static readonly JsonSerializerOptions MetadataOptions = new(JsonSerializerDefaults.Web);
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly string _schema;
     private readonly TimeProvider _timeProvider;
+    private readonly EventStoreMetrics? _metrics;
+    private readonly ILogger<PostgresEventStore>? _logger;
 
     /// <summary>
     /// Creates a store over <paramref name="dataSource"/>, persisting into
@@ -91,8 +98,21 @@ public sealed class PostgresEventStore : IEventStore
     /// Clock used to stamp <c>created_at</c> on appended events, injectable for deterministic tests.
     /// <see langword="null"/> (the default) resolves to <see cref="TimeProvider.System"/>.
     /// </param>
+    /// <param name="metrics">
+    /// Records <c>acta.append.throughput</c> for every <see cref="AppendAsync"/> call (task 8.6);
+    /// <see langword="null"/> (the default) disables the recording — additive, null-safe.
+    /// </param>
+    /// <param name="logger">
+    /// Emits structured, payload-free append/read log entries (task 8.6, decision D-4);
+    /// <see langword="null"/> (the default) disables logging — additive, null-safe.
+    /// </param>
     /// <exception cref="ArgumentException">The configured schema name is outside the allow-list.</exception>
-    public PostgresEventStore(NpgsqlDataSource dataSource, ActaPostgresOptions options, TimeProvider? timeProvider = null)
+    public PostgresEventStore(
+        NpgsqlDataSource dataSource,
+        ActaPostgresOptions options,
+        TimeProvider? timeProvider = null,
+        EventStoreMetrics? metrics = null,
+        ILogger<PostgresEventStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentNullException.ThrowIfNull(options);
@@ -100,6 +120,8 @@ public sealed class PostgresEventStore : IEventStore
         _dataSource = dataSource;
         _schema = SchemaName.Validate(options.SchemaName);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _metrics = metrics;
+        _logger = logger;
     }
 
     /// <inheritdoc/>
@@ -113,9 +135,14 @@ public sealed class PostgresEventStore : IEventStore
         ArgumentNullException.ThrowIfNull(events);
         ct.ThrowIfCancellationRequested();
 
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.AppendSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.StreamIdTag, streamId);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
+        AppendResult result;
         try
         {
-            return await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
+            result = await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
         {
@@ -124,10 +151,22 @@ public sealed class PostgresEventStore : IEventStore
             // stream row exists — re-run once: the retry's FOR UPDATE serializes on that row and the
             // dedup-before-guard path resolves the outcome (Deduplicated / ConcurrencyException /
             // genuine append) with no possibility of a further 23505 for this stream.
-            return await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
+            result = await AppendCoreAsync(streamId, expectedVersion, events, ct).ConfigureAwait(false);
         }
+
+        activity?.SetTag(ActaDiagnostics.EventCountTag, events.Count);
+        _metrics?.RecordAppend(events.Count, Backend);
+        _logger?.AppendCommitted(streamId, events.Count, result.LastGlobalPosition.Value, Backend);
+
+        return result;
     }
 
+    // Task 8.4: the append SQL steps (stream-head FOR UPDATE, empty-batch no-op, dedup-before-guard,
+    // concurrency guard, INSERT + head UPDATE) live in the shared, non-committing
+    // PostgresAppendCommands executor — the same one PostgresEventAppendTransaction delegates to for
+    // the AK-1 single-commit outbox seam (ADR-002, FR-14). This method's only remaining
+    // responsibility is opening its own connection/transaction and committing exactly once, after
+    // the executor returns, regardless of which branch (no-op / dedup / genuine write) it took.
     private async Task<AppendResult> AppendCoreAsync(
         string streamId,
         long expectedVersion,
@@ -137,65 +176,11 @@ public sealed class PostgresEventStore : IEventStore
         await using var connection = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        // 1) Read + row-lock the stream head. FOR UPDATE serializes appends to an existing stream;
-        //    a missing row means the stream does not exist yet (currentLastVersion = -1).
-        var (currentLastVersion, rowExists) = await ReadStreamHeadAsync(connection, transaction, streamId, ct)
-            .ConfigureAwait(false);
-
-        // 2) Empty batch = idempotent no-op (parity: InMemory OQ #3) — reports the current head.
-        if (events.Count == 0)
-        {
-            var noopHead = await ReadHeadPositionAsync(connection, transaction, streamId, ct).ConfigureAwait(false);
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
-            return new AppendResult(currentLastVersion, noopHead, Deduplicated: false);
-        }
-
-        var eventIds = new Guid[events.Count];
-        var versions = new long[events.Count];
-        var eventTypes = new string[events.Count];
-        var schemaVersions = new int[events.Count];
-        var payloads = new string[events.Count];
-        var metadatas = new string[events.Count];
-        for (var i = 0; i < events.Count; i++)
-        {
-            var eventData = events[i];
-            eventIds[i] = eventData.EventId;
-            versions[i] = currentLastVersion + 1 + i;
-            eventTypes[i] = eventData.EventType;
-            schemaVersions[i] = eventData.SchemaVersion;
-            payloads[i] = Encoding.UTF8.GetString(eventData.Payload.Span);
-            metadatas[i] = JsonSerializer.Serialize(eventData.Metadata, MetadataOptions);
-        }
-
-        // 3) Dedup BEFORE the guard (parity: HasAnyDuplicateKey — any already-seen key dedups the
-        //    whole batch). Explicit SELECT so the dedup branch consumes no global_position IDENTITY.
-        if (await BatchHasKnownEventAsync(connection, transaction, streamId, eventIds, ct).ConfigureAwait(false))
-        {
-            var dedupHead = await ReadHeadPositionAsync(connection, transaction, streamId, ct).ConfigureAwait(false);
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
-            return new AppendResult(currentLastVersion, dedupHead, Deduplicated: true);
-        }
-
-        // 4) Concurrency guard (throws ConcurrencyException -> await using rolls the transaction back).
-        ValidateExpectedVersion(streamId, expectedVersion, currentLastVersion);
-
-        // 5) Write. Create the stream row on first append, then set-based INSERT + head UPDATE.
-        var tenantId = events[0].Metadata.TenantId;
-        if (!rowExists)
-        {
-            await InsertStreamRowAsync(connection, transaction, streamId, tenantId, ct).ConfigureAwait(false);
-        }
-
-        var createdAt = _timeProvider.GetUtcNow();
-        var lastGlobalPosition = await InsertEventsAsync(
-            connection, transaction, streamId, tenantId, createdAt,
-            versions, eventIds, eventTypes, schemaVersions, payloads, metadatas, ct).ConfigureAwait(false);
-
-        var newLast = currentLastVersion + events.Count;
-        await UpdateStreamVersionAsync(connection, transaction, streamId, newLast, ct).ConfigureAwait(false);
+        var result = await PostgresAppendCommands.ExecuteAppendAsync(
+            connection, transaction, _schema, _timeProvider, streamId, expectedVersion, events, ct).ConfigureAwait(false);
 
         await transaction.CommitAsync(ct).ConfigureAwait(false);
-        return new AppendResult(newLast, new GlobalPosition(lastGlobalPosition), Deduplicated: false);
+        return result;
     }
 
     /// <inheritdoc/>
@@ -227,6 +212,12 @@ public sealed class PostgresEventStore : IEventStore
         Direction direction,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        // GAP-6: the Activity is started HERE, inside the async-iterator body, so the span covers the
+        // whole enumeration. No per-event SetTag in the loop below — only once, after it completes.
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.ReadSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.StreamIdTag, streamId);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
         var sql =
             $"""
              SELECT event_id, stream_id, version, global_position, event_type, schema_version, payload, metadata, created_at
@@ -241,11 +232,16 @@ public sealed class PostgresEventStore : IEventStore
         command.Parameters.AddWithValue("from", fromVersion);
         command.Parameters.Add(new NpgsqlParameter("to", NpgsqlDbType.Bigint) { Value = (object?)toVersion ?? DBNull.Value });
 
+        var count = 0;
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            count++;
             yield return MapEvent(reader);
         }
+
+        activity?.SetTag(ActaDiagnostics.EventCountTag, count);
+        _logger?.ReadCompleted(count, Backend, streamId);
     }
 
     private async IAsyncEnumerable<StoredEvent> ReadAllCoreAsync(
@@ -255,6 +251,10 @@ public sealed class PostgresEventStore : IEventStore
         Direction direction,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        // GAP-6: started inside this async-iterator body so the span covers the whole enumeration.
+        using var activity = ActaDiagnostics.ActivitySource.StartActivity(ActaDiagnostics.ReadSpan, ActivityKind.Internal);
+        activity?.SetTag(ActaDiagnostics.BackendTag, Backend);
+
         var limitClause = maxCount is null ? string.Empty : "\nLIMIT @maxCount";
         var sql =
             $"""
@@ -273,127 +273,16 @@ public sealed class PostgresEventStore : IEventStore
             command.Parameters.AddWithValue("maxCount", limit);
         }
 
+        var count = 0;
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            count++;
             yield return MapEvent(reader);
         }
-    }
 
-    private async Task<(long CurrentLastVersion, bool RowExists)> ReadStreamHeadAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, string streamId, CancellationToken ct)
-    {
-        await using var command = new NpgsqlCommand(
-            $"SELECT current_version FROM {_schema}.streams WHERE stream_id = @sid FOR UPDATE",
-            connection, transaction);
-        command.Parameters.AddWithValue("sid", streamId);
-
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            return (reader.GetInt64(0), true);
-        }
-
-        return (-1L, false);
-    }
-
-    // D1 (PERF-1): O(1) backward index probe on uq_events_stream_version — only ever run on the
-    // no-op / dedup branches that need the current head; the write path takes its head from RETURNING.
-    private async Task<GlobalPosition> ReadHeadPositionAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, string streamId, CancellationToken ct)
-    {
-        await using var command = new NpgsqlCommand(
-            $"SELECT global_position FROM {_schema}.events WHERE stream_id = @sid ORDER BY version DESC LIMIT 1",
-            connection, transaction);
-        command.Parameters.AddWithValue("sid", streamId);
-
-        var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return result is long position ? new GlobalPosition(position) : GlobalPosition.Start;
-    }
-
-    private async Task<bool> BatchHasKnownEventAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, string streamId, Guid[] eventIds, CancellationToken ct)
-    {
-        await using var command = new NpgsqlCommand(
-            $"SELECT count(*) FROM {_schema}.events WHERE stream_id = @sid AND event_id = ANY(@ids)",
-            connection, transaction);
-        command.Parameters.AddWithValue("sid", streamId);
-        command.Parameters.Add(new NpgsqlParameter("ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid) { Value = eventIds });
-
-        var count = (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
-        return count > 0;
-    }
-
-    private async Task InsertStreamRowAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, string streamId, string? tenantId, CancellationToken ct)
-    {
-        await using var command = new NpgsqlCommand(
-            $"INSERT INTO {_schema}.streams (stream_id, category, tenant_id, current_version) VALUES (@sid, @category, @tenant, -1)",
-            connection, transaction);
-        command.Parameters.AddWithValue("sid", streamId);
-        command.Parameters.AddWithValue("category", DeriveCategory(streamId));
-        command.Parameters.AddWithValue("tenant", (object?)tenantId ?? DBNull.Value);
-        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-    }
-
-    private async Task<long> InsertEventsAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        string streamId,
-        string? tenantId,
-        DateTimeOffset createdAt,
-        long[] versions,
-        Guid[] eventIds,
-        string[] eventTypes,
-        int[] schemaVersions,
-        string[] payloads,
-        string[] metadatas,
-        CancellationToken ct)
-    {
-        var sql =
-            $"""
-             INSERT INTO {_schema}.events
-                 (stream_id, version, event_id, event_type, schema_version, payload, metadata, tenant_id, created_at)
-             SELECT @sid, t.version, t.event_id, t.event_type, t.schema_version, t.payload::jsonb, t.metadata::jsonb, @tenant, @created_at
-             FROM unnest(@versions, @event_ids, @event_types, @schema_versions, @payloads, @metadatas)
-                  AS t(version, event_id, event_type, schema_version, payload, metadata)
-             RETURNING global_position
-             """;
-
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("sid", streamId);
-        command.Parameters.AddWithValue("tenant", (object?)tenantId ?? DBNull.Value);
-        command.Parameters.AddWithValue("created_at", createdAt);
-        command.Parameters.Add(new NpgsqlParameter("versions", NpgsqlDbType.Array | NpgsqlDbType.Bigint) { Value = versions });
-        command.Parameters.Add(new NpgsqlParameter("event_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid) { Value = eventIds });
-        command.Parameters.Add(new NpgsqlParameter("event_types", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = eventTypes });
-        command.Parameters.Add(new NpgsqlParameter("schema_versions", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = schemaVersions });
-        command.Parameters.Add(new NpgsqlParameter("payloads", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = payloads });
-        command.Parameters.Add(new NpgsqlParameter("metadatas", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = metadatas });
-
-        var lastGlobalPosition = long.MinValue;
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            var position = reader.GetInt64(0);
-            if (position > lastGlobalPosition)
-            {
-                lastGlobalPosition = position;
-            }
-        }
-
-        return lastGlobalPosition;
-    }
-
-    private async Task UpdateStreamVersionAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, string streamId, long newLast, CancellationToken ct)
-    {
-        await using var command = new NpgsqlCommand(
-            $"UPDATE {_schema}.streams SET current_version = @version WHERE stream_id = @sid",
-            connection, transaction);
-        command.Parameters.AddWithValue("version", newLast);
-        command.Parameters.AddWithValue("sid", streamId);
-        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        activity?.SetTag(ActaDiagnostics.EventCountTag, count);
+        _logger?.ReadCompleted(count, Backend, streamId: null);
     }
 
     private static StoredEvent MapEvent(NpgsqlDataReader reader) =>
@@ -408,40 +297,9 @@ public sealed class PostgresEventStore : IEventStore
             JsonSerializer.Deserialize<EventMetadata>(reader.GetFieldValue<string>(7), MetadataOptions)!,
             reader.GetFieldValue<DateTimeOffset>(8));
 
-    // Convention {category}-{id} (CONSTITUTION §1.1, D8 no PII): the prefix before the first '-',
-    // or the whole streamId when it has no '-'.
-    private static string DeriveCategory(string streamId)
-    {
-        var dashIndex = streamId.IndexOf('-', StringComparison.Ordinal);
-        return dashIndex >= 0 ? streamId[..dashIndex] : streamId;
-    }
-
     // SEC-1: emit the sort direction as a constant literal chosen by a switch over the closed
     // Direction enum — never direction.ToString() — so the interpolated token can only ever be one
     // of two compile-time constants.
     private static string OrderToken(Direction direction) =>
         direction == Direction.Backwards ? "DESC" : "ASC";
-
-    // Exact parity with InMemoryEventStore.ValidateExpectedVersion (03-contracts.md §1, ADR-003).
-    // GAP-2: EmptyStream collapses onto NoStream — an existing-but-empty stream is unreachable
-    // through the public API on Postgres too (the only path that creates a streams row is an append
-    // that ends with current_version >= 0).
-    private static void ValidateExpectedVersion(string streamId, long expectedVersion, long currentLastVersion)
-    {
-        var streamExists = currentLastVersion >= 0;
-
-        var guardSatisfied = expectedVersion switch
-        {
-            ExpectedVersion.Any => true,
-            ExpectedVersion.NoStream => !streamExists,
-            ExpectedVersion.StreamExists => streamExists,
-            ExpectedVersion.EmptyStream => !streamExists,
-            _ => currentLastVersion == expectedVersion,
-        };
-
-        if (!guardSatisfied)
-        {
-            throw new ConcurrencyException(streamId, expectedVersion, currentLastVersion);
-        }
-    }
 }

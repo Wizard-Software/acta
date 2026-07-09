@@ -206,6 +206,11 @@ public sealed class ProjectionDaemon : BackgroundService
             ?? await _checkpoints.LoadAsync(registration.Name, tenantId: null, ct).ConfigureAwait(false)
             ?? GlobalPosition.Start;
 
+        // Task 8.6, decision D-1: publish this tick's lock-free HWM/checkpoint snapshot for the
+        // acta.projection.lag gauge — once per tick, unconditionally (including the already-caught-up
+        // branch below), so the gauge never reports a stale lag from a previous tick.
+        registration.PublishLagSnapshot(hwm.Value, checkpoint.Value);
+
         if (checkpoint >= hwm)
         {
             registration.ExitCatchUp(); // Caught up to the global head — skip the batch read (P×T → 1).

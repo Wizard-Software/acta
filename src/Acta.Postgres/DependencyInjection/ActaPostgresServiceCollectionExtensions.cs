@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 
 using Acta.Abstractions;
 using Acta.Configuration;
+using Acta.Diagnostics;
 using Acta.Postgres.Configuration;
 using Acta.Postgres.Coordination;
 using Acta.Postgres.DependencyInjection;
@@ -160,10 +161,14 @@ public static class ActaPostgresServiceCollectionExtensions
 
         // Backend swap (D1): Replace, not TryAdd — unconditionally overrides AddActa's in-memory
         // registration regardless of whether AddActa ran before or as part of this call.
+        // EventStoreMetrics/ILogger<PostgresEventStore> (task 8.6): AddActa (called above) already
+        // registered EventStoreMetrics, so acta.append.throughput is instrumented on this backend too.
         services.Replace(ServiceDescriptor.Singleton<IEventStore>(sp => new PostgresEventStore(
             sp.GetRequiredService<NpgsqlDataSource>(),
             sp.GetRequiredService<ActaPostgresOptions>(),
-            sp.GetService<TimeProvider>())));
+            sp.GetService<TimeProvider>(),
+            sp.GetService<EventStoreMetrics>(),
+            sp.GetService<ILogger<PostgresEventStore>>())));
 
         // Catch-up source swap (task 7.3): the Postgres source carries the safe-HWM VisibilityLag
         // cutback (04-data §3.2), dormant on the in-memory source. Replace, not TryAdd — override the
