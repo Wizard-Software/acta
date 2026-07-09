@@ -98,6 +98,24 @@ public sealed class UpcasterChainTests
     }
 
     [Fact]
+    public void Upcast_NoUpcasterRegisteredForInputKey_UsesTheDocumentedFastPath_NotTheGeneralWalkList()
+    {
+        // PERF-2 (documented at the fast-path's call site): an already-terminal input must be
+        // returned WITHOUT ever building walk state (Queue/List/PathNode). Removing that fast path
+        // still produces the same VALUES through the loop's own terminal branch (same reference,
+        // same type, same version) — a `[single-element-collection-expression]` literal never
+        // materializes as a plain `List<T>` the way the full-walk branch's `results` variable does,
+        // so pinning "not a List<T>" observably distinguishes the fast path from the walked one
+        // without depending on the compiler's exact (unnameable) fast-path collection type.
+        var chain = new UpcasterChain([Linear("X", 1, "X", 2)]);
+        var input = new Marker("already-current");
+
+        var result = chain.Upcast(input, "X", 3, AnyMetadata());
+
+        result.Should().NotBeOfType<List<UpcastedEvent>>();
+    }
+
+    [Fact]
     public void Upcast_OperationalCrossTypeCycle_ThrowsUpcasterCycleException()
     {
         var chain = new UpcasterChain([
@@ -181,6 +199,32 @@ public sealed class UpcasterChainTests
             .Should().Throw<UpcasterCycleException>().Which;
 
         ex.Message.Should().Contain("work budget");
+    }
+
+    [Fact]
+    public void Upcast_TotalWorkExactlyAtBudget_CompletesWithoutThrowing()
+    {
+        // ComputeWorkBudget() == (Count + 1) * 64. With Count == 1, budget == 128: the root
+        // dequeue (1) plus 127 distinct terminal children fanned out from it (127) == exactly 128
+        // total dequeues (Q4's ++workDone tally). Pins the `> workBudget` boundary: reaching the
+        // budget exactly must still succeed — only EXCEEDING it may throw.
+        const int childCount = 127;
+        var produced = Enumerable.Range(0, childCount)
+            .Select(i => new UpcastedEvent(new Marker($"child-{i}"), $"WorkBudgetTerminal{i}", 1))
+            .ToArray();
+
+        var chain = new UpcasterChain([
+            new ConfigurableEventUpcaster
+            {
+                EventType = "WorkBudgetRoot",
+                FromSchemaVersion = 1,
+                Transform = (_, _) => produced,
+            },
+        ]);
+
+        var result = chain.Upcast(new Marker("root"), "WorkBudgetRoot", 1, AnyMetadata());
+
+        result.Should().HaveCount(childCount);
     }
 
     [Fact]

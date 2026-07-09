@@ -51,4 +51,20 @@ public sealed class InMemoryIntegrationEventCollectorTests
 
         secondDrain.Should().BeEmpty();
     }
+
+    [Fact]
+    public void Collect_NullIntegrationEvent_ThrowsArgumentNullException()
+    {
+        var collector = new InMemoryIntegrationEventCollector();
+
+        Invoking(() => collector.Collect(null!, CreateMetadata())).Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void Collect_NullMetadata_ThrowsArgumentNullException()
+    {
+        var collector = new InMemoryIntegrationEventCollector();
+
+        Invoking(() => collector.Collect("event", null!)).Should().Throw<ArgumentNullException>();
+    }
 }

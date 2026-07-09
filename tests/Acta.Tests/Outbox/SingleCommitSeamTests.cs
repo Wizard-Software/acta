@@ -180,4 +180,183 @@ public sealed class SingleCommitSeamTests
 
         await Awaiting(() => tx.CommitAsync(Ct).AsTask()).Should().ThrowAsync<ObjectDisposedException>();
     }
+
+    [Fact]
+    public async Task AppendAsync_AfterCommit_ExceptionMessageDescribesAppendAction()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        await using var tx = await factory.BeginAsync(Ct);
+        await tx.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct);
+        await tx.CommitAsync(Ct);
+
+        var ex = (await Awaiting(
+            () => tx.AppendAsync("order-1", ExpectedVersion.Any, CreateBatch(1), Ct).AsTask())
+            .Should().ThrowAsync<InvalidOperationException>()).Which;
+
+        // Guards against a mutant that blanks the "append to" action word — the tail of the
+        // message ("...has already been committed.") would otherwise still match a looser
+        // Contain("commit") check even with the action word stripped out.
+        ex.Message.Should().Be("Cannot append to a transaction that has already been committed.");
+    }
+
+    [Fact]
+    public async Task CommitAsync_CalledTwice_ExceptionMessageDescribesCommitAction()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        await using var tx = await factory.BeginAsync(Ct);
+        await tx.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct);
+        await tx.CommitAsync(Ct);
+
+        var ex = (await Awaiting(() => tx.CommitAsync(Ct).AsTask())
+            .Should().ThrowAsync<InvalidOperationException>()).Which;
+
+        ex.Message.Should().Be("Cannot commit a transaction that has already been committed.");
+    }
+
+    [Fact]
+    public async Task AppendAsync_EmptyBatchOnTransaction_ReturnsDeduplicatedFalse()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        await using var tx = await factory.BeginAsync(Ct);
+
+        var result = await tx.AppendAsync("order-1", ExpectedVersion.Any, [], Ct);
+
+        result.Deduplicated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AppendAsync_NullStreamId_ThrowsArgumentNullException()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        await using var tx = await factory.BeginAsync(Ct);
+
+        await Awaiting(() => tx.AppendAsync(null!, ExpectedVersion.Any, CreateBatch(1), Ct).AsTask())
+            .Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task AppendAsync_EmptyStreamId_ThrowsArgumentException()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        await using var tx = await factory.BeginAsync(Ct);
+
+        await Awaiting(() => tx.AppendAsync(string.Empty, ExpectedVersion.Any, CreateBatch(1), Ct).AsTask())
+            .Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task AppendAsync_NullEvents_ThrowsArgumentNullException()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        await using var tx = await factory.BeginAsync(Ct);
+
+        await Awaiting(() => tx.AppendAsync("order-1", ExpectedVersion.Any, null!, Ct).AsTask())
+            .Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task AppendAsync_CancelledToken_ThrowsOperationCanceledException()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        await using var tx = await factory.BeginAsync(Ct);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Awaiting(() => tx.AppendAsync("order-1", ExpectedVersion.Any, CreateBatch(1), cts.Token).AsTask())
+            .Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task BeginAsync_CancelledToken_ThrowsOperationCanceledException()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Awaiting(() => factory.BeginAsync(cts.Token).AsTask())
+            .Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task EnlistOutbox_NullEvents_ThrowsArgumentNullException()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        var tx = (InMemoryEventAppendTransaction)await factory.BeginAsync(Ct);
+
+        Invoking(() => tx.EnlistOutbox(null!)).Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task EnlistOutbox_AfterDispose_ThrowsObjectDisposedException()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        var tx = (InMemoryEventAppendTransaction)await factory.BeginAsync(Ct);
+        await tx.DisposeAsync();
+
+        Invoking(() => tx.EnlistOutbox([])).Should().Throw<ObjectDisposedException>();
+    }
+
+    [Fact]
+    public async Task EnlistOutbox_AfterCommit_ThrowsWithExactMessage()
+    {
+        var factory = new InMemoryEventAppendTransactionFactory();
+        var tx = (InMemoryEventAppendTransaction)await factory.BeginAsync(Ct);
+        await tx.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct);
+        await tx.CommitAsync(Ct);
+
+        List<CollectedIntegrationEvent> events = [new("late-event", CreateMetadata())];
+
+        // A "Statement mutation" survivor removes the ThrowIfCommitted(...) call entirely (no
+        // throw at all); a "String mutation" survivor blanks its action-word argument (wrong
+        // message). The exact-message assertion below kills both.
+        Invoking(() => tx.EnlistOutbox(events))
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("Cannot enlist outbox entries into a transaction that has already been committed.");
+    }
+
+    [Fact]
+    public async Task AppendAsync_SecondTransactionContinuesVersionSequenceAfterFirstCommits()
+    {
+        // Kills a mutant in InMemoryEventAppendTransaction.StreamHead that forces the "no local
+        // buffer entry yet" branch to always report (-1, GlobalPosition.Start) regardless of what
+        // is already committed: tx2 has no local buffer entry for "order-1" yet, so it must fall
+        // back to reading the FRESHLY COMMITTED state from tx1, not a hardcoded empty stream.
+        var factory = new InMemoryEventAppendTransactionFactory();
+
+        await using (var tx1 = await factory.BeginAsync(Ct))
+        {
+            await tx1.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(2), Ct);
+            await tx1.CommitAsync(Ct);
+        }
+
+        await using var tx2 = await factory.BeginAsync(Ct);
+        var result = await tx2.AppendAsync("order-1", expectedVersion: 1, CreateBatch(1), Ct);
+        await tx2.CommitAsync(Ct);
+
+        result.NextExpectedVersion.Should().Be(2);
+        var stored = factory.OutboxState.ReadStream("order-1");
+        stored.Select(e => e.Version).Should().Equal(0L, 1L, 2L);
+        stored.Select(e => e.GlobalPosition.Value).Should().Equal(1L, 2L, 3L);
+    }
+
+    [Fact]
+    public async Task CommitAsync_StreamCreatedByAnotherTransactionAfterBuffering_ThrowsConcurrencyExceptionAtCommitTime()
+    {
+        // tx1 buffers an append validated fine against the state AT BUFFER TIME (the stream does
+        // not exist yet). Meanwhile tx2 creates the very same stream and commits first. Kills a
+        // mutant that removes InMemoryOutboxState.Commit's re-validation of the guard against the
+        // freshest committed snapshot at commit time (AK-1 concurrency safety).
+        var factory = new InMemoryEventAppendTransactionFactory();
+
+        await using var tx1 = await factory.BeginAsync(Ct);
+        await tx1.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct);
+
+        await using (var tx2 = await factory.BeginAsync(Ct))
+        {
+            await tx2.AppendAsync("order-1", ExpectedVersion.NoStream, CreateBatch(1), Ct);
+            await tx2.CommitAsync(Ct);
+        }
+
+        await Awaiting(() => tx1.CommitAsync(Ct).AsTask()).Should().ThrowAsync<ConcurrencyException>();
+    }
 }

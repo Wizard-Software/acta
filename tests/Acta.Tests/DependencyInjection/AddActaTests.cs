@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Acta.Abstractions;
 using Acta.Configuration;
 using Acta.Correlation;
+using Acta.Diagnostics;
 using Acta.InMemory;
 using Acta.Serialization;
 using Acta.Tests.TestSupport;
@@ -197,6 +198,47 @@ public sealed class AddActaTests
 
         Invoking(() => services!.AddActa()).Should().Throw<ArgumentNullException>()
             .Which.ParamName.Should().Be("services");
+    }
+
+    /// <summary>
+    /// Guards against a false-negative on the test above: <c>Microsoft.Extensions.Options</c>'s own
+    /// <c>AddOptions&lt;TOptions&gt;()</c> ALSO null-checks its <c>services</c> parameter and throws
+    /// an <see cref="ArgumentNullException"/> with the identical <see cref="ArgumentException.ParamName"/>
+    /// ("services") — so removing <c>AddActa</c>'s own <c>ArgumentNullException.ThrowIfNull(services)</c>
+    /// guard would still produce an outwardly identical exception type/ParamName, just thrown one frame
+    /// deeper inside the framework's own <c>OptionsServiceCollectionExtensions.AddOptions</c>. Asserting
+    /// the stack trace does NOT mention that framework method proves <c>AddActa</c>'s OWN guard is what
+    /// fired, before ever reaching <c>services.AddOptions&lt;ActaOptions&gt;()</c>.
+    /// </summary>
+    [Fact]
+    public void AddActa_NullServices_ThrowsFromItsOwnGuard_BeforeReachingAddOptions()
+    {
+        IServiceCollection? services = null;
+
+        var ex = Invoking(() => services!.AddActa()).Should().Throw<ArgumentNullException>().Which;
+
+        ex.StackTrace.Should().NotContain("OptionsServiceCollectionExtensions");
+    }
+
+    [Fact]
+    public void AddActa_Default_RegistersResolvableEventStoreMetrics()
+    {
+        using var provider = BuildProvider();
+
+        var metrics = provider.GetRequiredService<EventStoreMetrics>();
+
+        metrics.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AddActa_TwoResolves_ReturnSameEventStoreMetricsSingletonInstance()
+    {
+        using var provider = BuildProvider();
+
+        var first = provider.GetRequiredService<EventStoreMetrics>();
+        var second = provider.GetRequiredService<EventStoreMetrics>();
+
+        second.Should().BeSameAs(first);
     }
 
     [Fact]
