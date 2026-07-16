@@ -32,7 +32,7 @@
       Microsoft.Extensions.* + System.Text.Json"). Latest stable 10.0.x verified against NuGet.org
       at implementation time (net10.0 SDK 10.0.301).
     -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
     <!-- Carrier of BackgroundService/IHostedService for the async projection daemon (task 5.2,
