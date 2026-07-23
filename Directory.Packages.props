@@ -20,7 +20,7 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <!-- Fluent assertion library (ADR-013 — AwesomeAssertions: maintained OSS fork of
          FluentAssertions v7 API, MIT license; test projects only, never referenced by src/). -->
-    <PackageVersion Include="AwesomeAssertions" Version="9.4.0" />
+    <PackageVersion Include="AwesomeAssertions" Version="9.5.0" />
     <!-- Property-based testing generators (ADR-013 — chosen over FsCheck: native C#, no F# runtime). -->
     <PackageVersion Include="CsCheck" Version="4.7.0" />
   </ItemGroup>

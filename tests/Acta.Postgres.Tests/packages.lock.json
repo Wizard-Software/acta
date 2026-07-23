@@ -4,9 +4,9 @@
     "net10.0": {
       "AwesomeAssertions": {
         "type": "Direct",
-        "requested": "[9.4.0, )",
-        "resolved": "9.4.0",
-        "contentHash": "dJxkWiQ8D+xT6Gr2sSL83+Mar+Vpy2JTcUPxFcckpPJ8VYBfSgnk+zqpS6t7kcGnjz8NLyF14qfuoL4bKzzoew=="
+        "requested": "[9.5.0, )",
+        "resolved": "9.5.0",
+        "contentHash": "F92MsjoF8B7IdcWETru4QGZx6VAl38qQPKNGS3kwPwlLB5lb0O4bhFqG8a8sz2estQJWkKmZkVy1r19HTaFcpg=="
       },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
@@ -332,7 +332,7 @@
         "dependencies": {
           "Acta": "[1.0.0, )",
           "Acta.Testing": "[1.0.0, )",
-          "AwesomeAssertions": "[9.4.0, )",
+          "AwesomeAssertions": "[9.5.0, )",
           "CsCheck": "[4.7.0, )",
           "Microsoft.Extensions.DependencyInjection": "[10.0.9, )",
           "Microsoft.Extensions.TimeProvider.Testing": "[10.7.0, )",
